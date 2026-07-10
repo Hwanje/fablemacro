@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">FableMacro</string>
+    <string name="acc_service_label">FableMacro 매크로 실행</string>
+    <string name="acc_service_desc">화면 탭/스와이프 제스처를 자동으로 실행하고, 뒤로가기/홈 등의 전역 동작을 수행하기 위해 필요합니다. 이 권한은 사용자가 만든 매크로 스크립트 실행에만 사용됩니다.</string>
+</resources>
