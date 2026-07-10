@@ -544,6 +544,11 @@ class OverlayPanel(private val service: OverlayService) {
 
     // ───────────────────────── 다이얼로그 헬퍼 ─────────────────────────
 
+    private fun numberInput(initial: String) = EditText(ctx).apply {
+        setText(initial)
+        inputType = InputType.TYPE_CLASS_NUMBER
+    }
+
     private fun dialog(title: String, content: View?, onOk: () -> Unit) {
         val b = AlertDialog.Builder(ctx)
         b.setTitle(title)
