@@ -12,21 +12,23 @@
 - **텍스트 검색 후 클릭 (OCR)** — ML Kit 한국어 OCR로 화면에서 텍스트를 찾아 클릭
 - **조건 분기** — 각 스텝마다 성공/실패 시 이동할 스텝 지정 (다음 / 중지 / n번 스텝 점프)
 - **재시도 루프** — 검색 액션은 무한(∞) 또는 n회 재시도 + 재시도 간격 설정
+- **액션 이름 지정** — 각 스텝에 원하는 이름을 붙여 리스트에서 바로 구분 (⚙ → 액션 이름)
+- **좌표 위치 확인 (◎)** — 탭/스와이프/경로/영역이 화면 어디에 설정됐는지 약 1.8초간 표시
+- **자동 업데이트** — 실행 시 GitHub 릴리스에서 새 버전을 확인하고 앱 안에서 바로 설치
 - **액션 종류**: 탭 · 스와이프 · 경로 · 딜레이 · 이미지 검색 · 텍스트 검색 · OCR 복사 · 텍스트 붙여넣기 · 앱 실행 · 뒤로가기 · 홈 · 최근 앱 · 랜덤 탭
 - **스크립트 저장/불러오기** — JSON으로 저장, 여러 스크립트 관리
-- **오버레이 편집기** — 플로팅 버블 → 패널에서 스텝 추가/설정/순서 변경/단일 실행
 
-## APK 빌드
+## 설치 / 업데이트
 
-### GitHub Actions (권장)
-푸시하면 자동으로 빌드됩니다. **Actions 탭 → Build APK → Artifacts** 에서 `FableMacro-debug-apk` 다운로드.
+### 최초 설치
+[Releases](https://github.com/Hwanje/fablemacro/releases/latest)에서 최신 `FableMacro-x.y.z.apk` 다운로드 후 설치.
 
-### 로컬 빌드
-```bash
-./gradlew assembleDebug
-# 출력: app/build/outputs/apk/debug/app-debug.apk
-```
-Android SDK (API 35) 필요. `local.properties`에 `sdk.dir=<SDK 경로>` 지정.
+### 이후 업데이트
+앱을 실행하면 자동으로 새 버전을 확인합니다. 새 버전이 있으면 안내 창에서
+**지금 업데이트**를 누르면 다운로드 후 설치 화면이 바로 열립니다.
+(수동 확인은 메인 화면의 **업데이트 확인** 버튼)
+
+최초 1회 "알 수 없는 앱 설치" 권한 허용이 필요합니다.
 
 ## 사용 방법
 
@@ -36,8 +38,23 @@ Android SDK (API 35) 필요. `local.properties`에 `sdk.dir=<SDK 경로>` 지정
 4. **화면 캡처 승인 후 시작** → 플로팅 버블 등장
 5. 자동화할 앱으로 이동 → 버블 탭 → 패널에서 액션 추가
    - 이미지 검색: 찾을 버튼/아이콘 영역을 드래그로 지정하면 자동 캡처됨
-   - 각 스텝의 ⚙ 에서 재시도 횟수(0 = ∞) / 성공·실패 분기 / 임계값 설정
+   - ⚙ : 액션 이름 / 재시도 횟수(0 = ∞) / 성공·실패 분기 / 임계값 설정
+   - ◎ : 설정된 좌표·영역이 화면 어디인지 잠시 표시
+   - ▷ : 해당 스텝만 단독 실행
 6. ▶ 실행 — 실행 중 버블(■)을 탭하면 중지
+
+## 빌드
+
+### GitHub Actions
+- `main` 푸시 → **Release APK** 워크플로가 버전을 `1.0.<run_number>`로 올려 빌드하고 GitHub Release 발행
+- 그 외 브랜치 푸시 → **Build APK** 워크플로가 디버그 APK를 아티팩트로 업로드
+
+### 로컬 빌드
+```bash
+./gradlew assembleDebug
+# 출력: app/build/outputs/apk/debug/app-debug.apk
+```
+Android SDK (API 35) 필요. `local.properties`에 `sdk.dir=<SDK 경로>` 지정.
 
 ## 기술 구성
 
@@ -49,5 +66,13 @@ Android SDK (API 35) 필요. `local.properties`에 `sdk.dir=<SDK 경로>` 지정
 | OCR | ML Kit Text Recognition (한국어, 온디바이스) |
 | 오버레이 | `TYPE_APPLICATION_OVERLAY` 플로팅 버블/패널 |
 | 저장 | Gson JSON + PNG 템플릿 |
+| 업데이트 | GitHub Releases API + FileProvider 설치 |
 
 - minSdk 26 (Android 8.0) / targetSdk 35
+
+### 서명키에 대해
+
+자동 업데이트로 기존 앱 위에 덮어쓰기 설치가 되려면 모든 빌드가 **같은 키**로 서명되어야 하므로,
+`app/signing/fablemacro.keystore`를 저장소에 포함해 CI가 항상 이 키로 서명합니다.
+개인 사이드로드용 앱 기준의 선택이며, 이 키는 공개되어 있으므로 Play 스토어 배포 등
+서명키가 비밀이어야 하는 용도라면 키를 새로 만들어 GitHub Secrets로 주입하도록 바꿔야 합니다.

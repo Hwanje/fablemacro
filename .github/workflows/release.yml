@@ -1,0 +1,58 @@
+name: Release APK
+
+# main에 푸시될 때마다 버전을 올려 릴리스를 발행한다.
+# 앱의 자동 업데이트는 이 릴리스의 최신 태그를 보고 새 버전을 판단한다.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Compute version
+        id: ver
+        run: echo "name=1.0.${{ github.run_number }}" >> "$GITHUB_OUTPUT"
+
+      - name: Build release APK
+        run: |
+          ./gradlew assembleRelease \
+            -PappVersionCode=${{ github.run_number }} \
+            -PappVersionName=${{ steps.ver.outputs.name }}
+
+      - name: Rename APK
+        run: |
+          mkdir -p dist
+          cp app/build/outputs/apk/release/app-release.apk \
+             "dist/FableMacro-${{ steps.ver.outputs.name }}.apk"
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # 커밋 메시지를 셸에 직접 넣으면 따옴표/줄바꿈에 깨지므로 환경변수로 전달
+          COMMIT_MSG: ${{ github.event.head_commit.message }}
+        run: |
+          printf '%s\n' "${COMMIT_MSG:-수동 배포}" > notes.md
+          gh release create "v${{ steps.ver.outputs.name }}" \
+            "dist/FableMacro-${{ steps.ver.outputs.name }}.apk" \
+            --title "FableMacro ${{ steps.ver.outputs.name }}" \
+            --notes-file notes.md

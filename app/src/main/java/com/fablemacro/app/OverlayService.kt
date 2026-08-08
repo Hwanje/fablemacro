@@ -12,6 +12,7 @@ import android.content.pm.ServiceInfo
 import android.graphics.Bitmap
 import android.graphics.Color
 import android.graphics.PixelFormat
+import android.graphics.Rect
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.media.projection.MediaProjection
@@ -30,6 +31,7 @@ import com.fablemacro.app.engine.MacroEngine
 import com.fablemacro.app.model.MacroAction
 import com.fablemacro.app.model.MacroScript
 import com.fablemacro.app.model.ScriptStore
+import com.fablemacro.app.ui.MarkerView
 import com.fablemacro.app.ui.OverlayPanel
 import com.fablemacro.app.ui.fullscreenPickerParams
 import kotlinx.coroutines.CoroutineScope
@@ -39,6 +41,8 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import kotlin.math.abs
+import kotlin.math.max
+import kotlin.math.min
 
 /**
  * 포그라운드 오버레이 서비스.
@@ -50,6 +54,9 @@ class OverlayService : Service(), MacroEngine.Listener {
         const val EXTRA_RESULT_CODE = "resultCode"
         const val EXTRA_RESULT_DATA = "resultData"
         const val ACTION_STOP = "com.fablemacro.app.STOP"
+
+        /** 좌표 미리보기 표시 시간 */
+        private const val PREVIEW_DURATION_MS = 1800L
 
         @Volatile
         var isRunning = false
@@ -72,6 +79,7 @@ class OverlayService : Service(), MacroEngine.Listener {
     private var panel: OverlayPanel? = null
     private var panelAttached = false
     private var picker: View? = null
+    private var marker: View? = null
     private var nudgeFlip = false
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -258,12 +266,56 @@ class OverlayService : Service(), MacroEngine.Listener {
     fun showPicker(view: View) {
         removePicker()
         picker = view
-        wm.addView(view, fullscreenPickerParams())
+        wm.addView(view, fullscreenPickerParams(this))
     }
 
     fun removePicker() {
         picker?.let { runCatching { wm.removeView(it) } }
         picker = null
+    }
+
+    /**
+     * 액션에 설정된 좌표/영역이 화면 어디인지 잠시 표시한다.
+     * 패널이 가릴 수 있으므로 표시하는 동안 패널을 숨겼다가 되돌린다.
+     */
+    fun previewAction(action: MacroAction) {
+        if (!action.canPreview()) {
+            panel?.setStatus("표시할 좌표가 없습니다")
+            return
+        }
+        removeMarker()
+        val points = action.previewPoints()
+        val region = action.previewRegion()?.let {
+            Rect(min(it[0], it[2]), min(it[1], it[3]), max(it[0], it[2]), max(it[1], it[3]))
+        }
+        val label = buildString {
+            append(action.displayName())
+            when {
+                points.size == 1 -> append("  (${points[0][0]}, ${points[0][1]})")
+                points.size > 1 -> append("  ${points.size}개 지점")
+                region != null -> append("  ${region.width()} x ${region.height()}")
+            }
+        }
+
+        val wasPanelVisible = panelAttached
+        if (wasPanelVisible) setPanelVisible(false)
+
+        val view = MarkerView(this, points, region, label)
+        val params = fullscreenPickerParams(this).apply {
+            flags = flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+        }
+        wm.addView(view, params)
+        marker = view
+
+        mainHandler.postDelayed({
+            removeMarker()
+            if (wasPanelVisible) setPanelVisible(true)
+        }, PREVIEW_DURATION_MS)
+    }
+
+    private fun removeMarker() {
+        marker?.let { runCatching { wm.removeView(it) } }
+        marker = null
     }
 
     // ───────────────────────── 캡처 ─────────────────────────
@@ -318,7 +370,7 @@ class OverlayService : Service(), MacroEngine.Listener {
     override fun onStep(index: Int, action: MacroAction, attempt: Int) {
         panel?.highlight(index)
         val att = if (attempt > 1) " (시도 $attempt)" else ""
-        panel?.setStatus("실행 중: ${index + 1}. ${action.type.label}$att")
+        panel?.setStatus("실행 중: ${index + 1}. ${action.displayName()}$att")
     }
 
     override fun onFinished(message: String) {
@@ -333,7 +385,9 @@ class OverlayService : Service(), MacroEngine.Listener {
     override fun onDestroy() {
         isRunning = false
         runCatching { engine.stop() }
+        mainHandler.removeCallbacksAndMessages(null)
         removePicker()
+        removeMarker()
         if (panelAttached) runCatching { wm.removeView(panel!!.root) }
         panelAttached = false
         bubble?.let { runCatching { wm.removeView(it) } }

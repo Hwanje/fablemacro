@@ -182,13 +182,15 @@ class OverlayPanel(private val service: OverlayService) {
                 setPadding(dp(7), dp(5), dp(4), dp(5))
             }
             val info = LinearLayout(service).apply { orientation = LinearLayout.VERTICAL }
-            info.addView(text("${i + 1}. ${a.type.emoji} ${a.type.label}  (${a.id})", 11f, bold = true))
+            info.addView(text("${i + 1}. ${a.type.emoji} ${a.displayName()}", 11f, bold = true))
             val extra = buildString {
+                if (a.hasCustomName()) append("${a.type.label} · ")
                 append(a.summary())
                 branchSummary(a)?.let { append("  $it") }
             }
             if (extra.isNotBlank()) info.addView(text(extra, 10f, Color.LTGRAY))
             row.addView(info, LinearLayout.LayoutParams(0, WRAP, 1f))
+            if (a.canPreview()) row.addView(iconButton("◎") { service.previewAction(a) })
             row.addView(iconButton("▷") { runSingle(a) })
             row.addView(iconButton("⚙") { showSettings(i) })
             row.addView(iconButton("↑") { move(i, -1) })
@@ -465,6 +467,9 @@ class OverlayPanel(private val service: OverlayService) {
         val isSearch = a.type == ActionType.SEARCH_IMAGE || a.type == ActionType.SEARCH_TEXT
         var clickBox: CheckBox? = null
 
+        // 액션 이름 — 모든 타입 공통, 비워두면 타입 이름으로 표시된다
+        field("name", "액션 이름 (비우면 «${a.type.label}»)", a.name ?: "", numeric = false)
+
         when (a.type) {
             ActionType.TAP -> {
                 field("x", "X 좌표", a.x.toString())
@@ -504,8 +509,9 @@ class OverlayPanel(private val service: OverlayService) {
         field("post", "실행 후 대기 (ms)", a.postDelayMs.toString())
 
         val scroll = ScrollView(ctx).apply { addView(layout) }
-        dialog("스텝 ${index + 1}: ${a.type.label} 설정", scroll, onOk = {
+        dialog("스텝 ${index + 1}: ${a.displayName()} 설정", scroll, onOk = {
             fun num(key: String, def: Long) = fields[key]?.text?.toString()?.trim()?.toLongOrNull() ?: def
+            fields["name"]?.let { a.name = it.text.toString().trim().ifBlank { null } }
             fields["x"]?.let { a.x = num("x", a.x.toLong()).toInt() }
             fields["y"]?.let { a.y = num("y", a.y.toLong()).toInt() }
             fields["x2"]?.let { a.x2 = num("x2", a.x2.toLong()).toInt() }

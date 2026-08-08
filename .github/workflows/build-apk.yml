@@ -2,7 +2,8 @@ name: Build APK
 
 on:
   push:
-    branches: ["**"]
+    # main은 release.yml이 빌드 후 릴리스까지 발행하므로 제외한다
+    branches-ignore: [main]
   workflow_dispatch:
 
 jobs:

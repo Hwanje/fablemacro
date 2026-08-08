@@ -41,6 +41,8 @@ fun randomId(): String = (1..8).map { ID_CHARS.random() }.joinToString("")
 data class MacroAction(
     var id: String = randomId(),
     var type: ActionType = ActionType.TAP,
+    // 사용자가 지정한 액션 이름 (비어 있으면 타입 이름으로 표시)
+    var name: String? = null,
     // 좌표 (TAP / SWIPE 시작점)
     var x: Int = 0,
     var y: Int = 0,
@@ -77,6 +79,27 @@ data class MacroAction(
     // TAP 반복 횟수
     var repeatCount: Int = 1,
 ) {
+    /** 리스트 제목에 쓸 이름 — 지정한 이름이 없으면 타입 이름 */
+    fun displayName(): String = name?.takeIf { it.isNotBlank() } ?: type.label
+
+    /** 이름을 따로 지정한 경우에만 타입 이름을 부제로 노출 */
+    fun hasCustomName(): Boolean = !name.isNullOrBlank()
+
+    /** 화면에서 위치를 미리 보여줄 수 있는 액션인지 */
+    fun previewPoints(): List<IntArray> = when (type) {
+        ActionType.TAP -> listOf(intArrayOf(x, y))
+        ActionType.SWIPE -> listOf(intArrayOf(x, y), intArrayOf(x2, y2))
+        ActionType.PATH -> points.toList()
+        else -> emptyList()
+    }
+
+    fun previewRegion(): IntArray? = when (type) {
+        ActionType.TAP, ActionType.SWIPE, ActionType.PATH -> null
+        else -> region
+    }
+
+    fun canPreview(): Boolean = previewPoints().isNotEmpty() || previewRegion() != null
+
     /** 리스트에 표시할 파라미터 요약 */
     fun summary(): String = when (type) {
         ActionType.TAP -> "($x, $y) x$repeatCount"
