@@ -357,6 +357,9 @@ class OverlayPanel(private val service: OverlayService) {
             setPadding(dp(16), dp(8), dp(16), dp(8))
         }
 
+        // 항목을 고르면 목록은 닫고 상세로 넘어간다
+        var managerDialog: AlertDialog? = null
+
         if (names.isEmpty()) {
             body.addView(TextView(ctx).apply {
                 text = "저장된 매크로가 없습니다.\n💾 로 현재 스크립트를 저장하거나, 백업 파일을 가져올 수 있습니다."
@@ -368,7 +371,10 @@ class OverlayPanel(private val service: OverlayService) {
                 val row = LinearLayout(ctx).apply {
                     orientation = LinearLayout.VERTICAL
                     setPadding(dp(4), dp(10), dp(4), dp(10))
-                    setOnClickListener { showScriptDetail(name) }
+                    setOnClickListener {
+                        managerDialog?.dismiss()
+                        showScriptDetail(name)
+                    }
                 }
                 row.addView(TextView(ctx).apply {
                     text = if (name == script.name) "$name  (현재 편집 중)" else name
@@ -396,7 +402,9 @@ class OverlayPanel(private val service: OverlayService) {
             setStatus("백업 파일을 선택하세요")
         }
         b.setNegativeButton("닫기", null)
-        showOverlayDialog(b.create())
+        val created = b.create()
+        managerDialog = created
+        showOverlayDialog(created)
     }
 
     private fun describe(i: ScriptStore.ScriptInfo): String {
