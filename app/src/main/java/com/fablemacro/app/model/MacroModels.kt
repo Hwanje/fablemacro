@@ -6,6 +6,11 @@ import android.graphics.BitmapFactory
 import com.google.gson.Gson
 import com.google.gson.GsonBuilder
 import java.io.File
+import java.io.InputStream
+import java.io.OutputStream
+import java.util.zip.ZipEntry
+import java.util.zip.ZipInputStream
+import java.util.zip.ZipOutputStream
 
 /** 액션 종류 (스크린샷의 Action List 대응) */
 enum class ActionType(val label: String, val emoji: String) {
@@ -161,4 +166,102 @@ class ScriptStore(private val context: Context) {
         if (!f.exists()) return null
         return BitmapFactory.decodeFile(f.absolutePath)
     }
+
+    /** 저장 목록에서 보여줄 요약 정보 */
+    data class ScriptInfo(
+        val name: String,
+        val steps: Int,
+        val templates: Int,
+        val missingTemplates: Int,
+        val modifiedAt: Long,
+        val bytes: Long,
+    )
+
+    fun info(name: String): ScriptInfo? {
+        val f = File(scriptDir, "$name.json")
+        if (!f.exists()) return null
+        val s = load(name) ?: return ScriptInfo(name, 0, 0, 0, f.lastModified(), f.length())
+        val templates = s.actions.mapNotNull { it.imageFile }.distinct()
+        val missing = templates.count { !File(imageDir, it).exists() }
+        return ScriptInfo(name, s.actions.size, templates.size, missing, f.lastModified(), f.length())
+    }
+
+    /**
+     * 스크립트 + 참조하는 템플릿 이미지를 ZIP 한 개로 묶어 내보낸다.
+     * 이미지까지 함께 담기므로 다른 기기에서도 그대로 복원된다.
+     */
+    fun exportTo(name: String, out: OutputStream): Boolean {
+        val script = load(name) ?: return false
+        ZipOutputStream(out.buffered()).use { zip ->
+            zip.putNextEntry(ZipEntry("script.json"))
+            zip.write(gson.toJson(script).toByteArray())
+            zip.closeEntry()
+
+            for (img in script.actions.mapNotNull { it.imageFile }.distinct()) {
+                val f = File(imageDir, img)
+                if (!f.exists()) continue
+                zip.putNextEntry(ZipEntry("images/$img"))
+                f.inputStream().use { it.copyTo(zip) }
+                zip.closeEntry()
+            }
+        }
+        return true
+    }
+
+    /**
+     * exportTo로 만든 ZIP을 되돌린다. 이미 같은 이름이 있으면 «이름 (2)» 처럼 번호를 붙여
+     * 기존 저장본을 덮어쓰지 않는다. 복원된 스크립트 이름을 반환.
+     */
+    fun importFrom(input: InputStream): String? {
+        var json: String? = null
+        val images = mutableMapOf<String, ByteArray>()
+
+        ZipInputStream(input.buffered()).use { zip ->
+            while (true) {
+                val entry = zip.nextEntry ?: break
+                // 경로 탈출(zip slip) 방지 — 파일명만 사용한다
+                val entryName = File(entry.name).name
+                when {
+                    entry.isDirectory -> {}
+                    entry.name == "script.json" -> json = zip.readBytes().decodeToString()
+                    entry.name.startsWith("images/") && entryName.isNotBlank() ->
+                        images[entryName] = zip.readBytes()
+                }
+                zip.closeEntry()
+            }
+        }
+
+        val script = json?.let {
+            runCatching { gson.fromJson(it, MacroScript::class.java) }.getOrNull()
+        } ?: return null
+
+        // 템플릿 이미지 파일명이 기존 것과 겹치면 새 이름으로 복사하고 참조를 바꾼다
+        val renamed = mutableMapOf<String, String>()
+        for ((origName, bytes) in images) {
+            val target = if (File(imageDir, origName).exists()) "${randomId()}.png" else origName
+            File(imageDir, target).writeBytes(bytes)
+            renamed[origName] = target
+        }
+        for (a in script.actions) {
+            a.imageFile?.let { a.imageFile = renamed[it] ?: it }
+        }
+
+        script.name = uniqueName(script.name.ifBlank { "가져온 스크립트" })
+        save(script)
+        return script.name
+    }
+
+    /** 기존 저장본을 덮어쓰지 않는 이름 만들기 */
+    fun uniqueName(base: String): String {
+        val safe = base.replace(Regex("[/\\\\:*?\"<>|]"), "_").ifBlank { "script" }
+        if (!File(scriptDir, "$safe.json").exists()) return safe
+        var n = 2
+        while (File(scriptDir, "$safe ($n).json").exists()) n++
+        return "$safe ($n)"
+    }
+
+    fun exists(name: String): Boolean = File(scriptDir, "$name.json").exists()
+
+    /** 저장하지 않은 변경이 있는지 비교하기 위한 스냅샷 */
+    fun snapshot(script: MacroScript): String = gson.toJson(script)
 }

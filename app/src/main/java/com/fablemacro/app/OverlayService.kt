@@ -313,6 +313,12 @@ class OverlayService : Service(), MacroEngine.Listener {
         }, PREVIEW_DURATION_MS)
     }
 
+    /** 오버레이(버블 + 패널)를 완전히 종료한다. 실행 중인 매크로가 있으면 먼저 멈춘다. */
+    fun shutdownOverlay() {
+        if (engine.isRunning) runCatching { engine.stop() }
+        stopSelf()
+    }
+
     private fun removeMarker() {
         marker?.let { runCatching { wm.removeView(it) } }
         marker = null

@@ -33,6 +33,13 @@
             </intent-filter>
         </activity>
 
+        <!-- 백업 ZIP 선택용 투명 화면 (오버레이에서 가져오기 실행) -->
+        <activity
+            android:name=".backup.ImportActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+
         <service
             android:name=".OverlayService"
             android:exported="false"

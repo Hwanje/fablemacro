@@ -7,6 +7,7 @@ import android.graphics.Rect
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.text.InputType
+import android.text.format.DateFormat
 import android.view.ContextThemeWrapper
 import android.view.Gravity
 import android.view.View
@@ -18,10 +19,12 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import com.fablemacro.app.OverlayService
+import com.fablemacro.app.backup.BackupManager
 import com.fablemacro.app.model.ActionType
 import com.fablemacro.app.model.Goto
 import com.fablemacro.app.model.MacroAction
 import com.fablemacro.app.model.MacroScript
+import com.fablemacro.app.model.ScriptStore
 import kotlinx.coroutines.launch
 import kotlin.math.max
 import kotlin.math.min
@@ -44,6 +47,9 @@ class OverlayPanel(private val service: OverlayService) {
     private val listContainer: LinearLayout
     private val statusView: TextView
     private var highlighted = -1
+
+    /** 마지막으로 저장/불러온 시점의 내용 — 변경 여부 판단용 */
+    private var savedSnapshot: String = ""
 
     private val darkBg = Color.parseColor("#F2242424")
     private val rowBg = Color.parseColor("#FF333333")
@@ -69,9 +75,10 @@ class OverlayPanel(private val service: OverlayService) {
         playBtn = iconButton("▶", accent) { onPlay() }
         header.addView(playBtn)
         header.addView(iconButton("💾") { onSave() })
-        header.addView(iconButton("📂") { onLoad() })
+        header.addView(iconButton("📚") { showScriptManager() })
         header.addView(iconButton("✚") { onNew() })
         header.addView(iconButton("─") { service.setPanelVisible(false) })
+        header.addView(iconButton("✕", Color.parseColor("#FFFF8A80")) { confirmShutdown() })
         root.addView(header)
 
         root.addView(divider())
@@ -108,6 +115,7 @@ class OverlayPanel(private val service: OverlayService) {
         statusView = text("준비됨", 11f, Color.LTGRAY)
         root.addView(statusView)
 
+        markSaved()
         refreshList()
     }
 
@@ -166,7 +174,8 @@ class OverlayPanel(private val service: OverlayService) {
 
     @SuppressLint("SetTextI18n")
     fun refreshList() {
-        titleView.text = script.name
+        // 저장하지 않은 변경은 제목 옆 • 로 알린다
+        titleView.text = if (isDirty()) "${script.name} •" else script.name
         listContainer.removeAllViews()
         if (script.actions.isEmpty()) {
             listContainer.addView(text("아래 Action List에서 액션을 추가하세요", 11f, Color.GRAY).apply {
@@ -218,15 +227,51 @@ class OverlayPanel(private val service: OverlayService) {
     private fun move(i: Int, delta: Int) {
         val j = i + delta
         if (j !in script.actions.indices) return
-        val tmp = script.actions[i]
-        script.actions[i] = script.actions[j]
-        script.actions[j] = tmp
+        keepingBranchTargets {
+            val tmp = script.actions[i]
+            script.actions[i] = script.actions[j]
+            script.actions[j] = tmp
+        }
         refreshList()
+    }
+
+    /** 스텝을 지정한 위치로 옮긴다 (설정 다이얼로그의 «순서» 입력) */
+    private fun reorder(from: Int, to: Int) {
+        if (from == to || from !in script.actions.indices) return
+        val target = to.coerceIn(0, script.actions.size - 1)
+        keepingBranchTargets {
+            val item = script.actions.removeAt(from)
+            script.actions.add(target, item)
+        }
+    }
+
+    /**
+     * 순서를 바꿔도 분기(성공/실패 시 이동)가 원래 가리키던 스텝을 계속 가리키게 한다.
+     * 분기 값은 인덱스라서 재배치 후 그대로 두면 엉뚱한 스텝으로 점프한다.
+     */
+    private fun keepingBranchTargets(block: () -> Unit) {
+        val before = script.actions.toList()
+        fun refOf(goto: Int) = if (goto >= 0) before.getOrNull(goto)?.id else null
+        val successRefs = before.map { refOf(it.onSuccessGoto) }
+        val failureRefs = before.map { refOf(it.onFailureGoto) }
+
+        block()
+
+        val indexById = script.actions.withIndex().associate { (i, a) -> a.id to i }
+        for ((k, a) in before.withIndex()) {
+            successRefs[k]?.let { id ->
+                // 가리키던 스텝이 사라졌으면 다음 스텝으로 이어가게 한다
+                a.onSuccessGoto = indexById[id] ?: Goto.NEXT
+            }
+            failureRefs[k]?.let { id ->
+                a.onFailureGoto = indexById[id] ?: Goto.NEXT
+            }
+        }
     }
 
     private fun confirmDelete(i: Int) {
         dialog("스텝 ${i + 1} 삭제", null, onOk = {
-            script.actions.removeAt(i)
+            keepingBranchTargets { script.actions.removeAt(i) }
             refreshList()
         })
     }
@@ -248,36 +293,246 @@ class OverlayPanel(private val service: OverlayService) {
 
     private fun onSave() {
         service.store.save(script)
+        markSaved()
+        refreshList()
         setStatus("저장됨: ${script.name}")
     }
 
-    private fun onLoad() {
-        val names = service.store.listNames()
-        if (names.isEmpty()) {
-            setStatus("저장된 스크립트가 없습니다")
+    private fun onNew() {
+        confirmDiscard("새 스크립트") {
+            script = MacroScript()
+            highlighted = -1
+            markSaved()
+            refreshList()
+            setStatus("새 스크립트")
+        }
+    }
+
+    /** 오버레이 종료 — 저장하지 않은 내용이 있으면 먼저 알린다 */
+    private fun confirmShutdown() {
+        val msg = if (isDirty()) {
+            "오버레이를 종료할까요?\n«${script.name}»에 저장하지 않은 변경이 있습니다."
+        } else {
+            "오버레이를 종료할까요?"
+        }
+        dialog(msg, null, onOk = { service.shutdownOverlay() })
+    }
+
+    // ───────────────────────── 저장 상태 추적 ─────────────────────────
+
+    private fun markSaved() {
+        savedSnapshot = service.store.snapshot(script)
+    }
+
+    private fun isDirty(): Boolean = service.store.snapshot(script) != savedSnapshot
+
+    /** 저장하지 않은 변경이 있으면 확인을 받고 진행 */
+    private fun confirmDiscard(what: String, onProceed: () -> Unit) {
+        if (!isDirty()) {
+            onProceed()
             return
         }
         val b = AlertDialog.Builder(ctx)
-        b.setTitle("스크립트 불러오기")
-        b.setItems(names.toTypedArray()) { _, which ->
-            service.store.load(names[which])?.let {
-                script = it
-                highlighted = -1
-                refreshList()
-                setStatus("불러옴: ${it.name}")
+        b.setTitle("$what — 저장하지 않은 변경이 있습니다")
+        b.setMessage("«${script.name}»의 변경 내용을 어떻게 할까요?")
+        b.setPositiveButton("저장하고 계속") { _, _ ->
+            service.store.save(script)
+            markSaved()
+            onProceed()
+        }
+        b.setNeutralButton("버리고 계속") { _, _ -> onProceed() }
+        b.setNegativeButton("취소", null)
+        showOverlayDialog(b.create())
+    }
+
+    // ───────────────────────── 저장된 매크로 관리 ─────────────────────────
+
+    /** 저장본 목록 — 내용 확인 / 불러오기 / 백업 내보내기 / 복제 / 삭제 */
+    @SuppressLint("SetTextI18n")
+    private fun showScriptManager() {
+        val names = service.store.listNames()
+
+        val body = LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(16), dp(8), dp(16), dp(8))
+        }
+
+        if (names.isEmpty()) {
+            body.addView(TextView(ctx).apply {
+                text = "저장된 매크로가 없습니다.\n💾 로 현재 스크립트를 저장하거나, 백업 파일을 가져올 수 있습니다."
+                textSize = 12f
+            })
+        } else {
+            for (name in names) {
+                val info = service.store.info(name)
+                val row = LinearLayout(ctx).apply {
+                    orientation = LinearLayout.VERTICAL
+                    setPadding(dp(4), dp(10), dp(4), dp(10))
+                    setOnClickListener { showScriptDetail(name) }
+                }
+                row.addView(TextView(ctx).apply {
+                    text = if (name == script.name) "$name  (현재 편집 중)" else name
+                    textSize = 14f
+                    setTypeface(null, Typeface.BOLD)
+                })
+                row.addView(TextView(ctx).apply {
+                    text = info?.let { describe(it) } ?: "읽을 수 없는 파일"
+                    textSize = 11f
+                })
+                body.addView(row)
+                body.addView(View(ctx).apply {
+                    setBackgroundColor(Color.parseColor("#22000000"))
+                    layoutParams = LinearLayout.LayoutParams(MATCH, dp(1))
+                })
+            }
+        }
+
+        val b = AlertDialog.Builder(ctx)
+        b.setTitle("저장된 매크로 (${names.size}개)")
+        b.setView(ScrollView(ctx).apply { addView(body) })
+        b.setPositiveButton("가져오기") { _, _ ->
+            service.setPanelVisible(false)
+            BackupManager.startImport(service)
+            setStatus("백업 파일을 선택하세요")
+        }
+        b.setNegativeButton("닫기", null)
+        showOverlayDialog(b.create())
+    }
+
+    private fun describe(i: ScriptStore.ScriptInfo): String {
+        val date = DateFormat.format("yyyy-MM-dd HH:mm", i.modifiedAt)
+        val size = if (i.bytes < 1024) "${i.bytes}B" else "${i.bytes / 1024}KB"
+        return buildString {
+            append("${i.steps}스텝")
+            if (i.templates > 0) append(" · 이미지 ${i.templates}개")
+            if (i.missingTemplates > 0) append(" ⚠️이미지 ${i.missingTemplates}개 없음")
+            append(" · $date · $size")
+        }
+    }
+
+    /** 저장본을 불러오지 않고 내용만 미리 확인 + 관리 동작 */
+    @SuppressLint("SetTextI18n")
+    private fun showScriptDetail(name: String) {
+        val saved = service.store.load(name)
+        if (saved == null) {
+            setStatus("«$name» 을 읽을 수 없습니다")
+            return
+        }
+        val info = service.store.info(name)
+
+        val body = LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(16), dp(8), dp(16), dp(8))
+        }
+        info?.let {
+            body.addView(TextView(ctx).apply { text = describe(it); textSize = 11f })
+        }
+        if (info != null && info.missingTemplates > 0) {
+            body.addView(TextView(ctx).apply {
+                text = "⚠️ 템플릿 이미지 일부가 없어 이미지 검색이 실패할 수 있습니다."
+                textSize = 11f
+                setTextColor(Color.parseColor("#FFD32F2F"))
+            })
+        }
+        body.addView(TextView(ctx).apply {
+            text = "\n스텝 ${saved.actions.size}개"
+            textSize = 12f
+            setTypeface(null, Typeface.BOLD)
+        })
+        for ((i, a) in saved.actions.withIndex()) {
+            body.addView(TextView(ctx).apply {
+                text = "${i + 1}. ${a.type.emoji} ${a.displayName()}   ${a.summary()}"
+                textSize = 11f
+                setPadding(0, dp(3), 0, dp(3))
+            })
+        }
+
+        val b = AlertDialog.Builder(ctx)
+        b.setTitle(name)
+        b.setView(ScrollView(ctx).apply { addView(body) })
+        b.setPositiveButton("불러오기") { _, _ ->
+            confirmDiscard("불러오기") {
+                service.store.load(name)?.let {
+                    script = it
+                    highlighted = -1
+                    markSaved()
+                    refreshList()
+                    setStatus("불러옴: ${it.name}")
+                }
+            }
+        }
+        b.setNeutralButton("내보내기") { _, _ -> exportScript(name) }
+        b.setNegativeButton("더보기") { _, _ -> showScriptActions(name) }
+        showOverlayDialog(b.create())
+    }
+
+    private fun showScriptActions(name: String) {
+        val b = AlertDialog.Builder(ctx)
+        b.setTitle(name)
+        b.setItems(arrayOf("백업 내보내기", "복제", "삭제")) { _, which ->
+            when (which) {
+                0 -> exportScript(name)
+                1 -> duplicateScript(name)
+                2 -> confirmDeleteScript(name)
             }
         }
         b.setNegativeButton("취소", null)
         showOverlayDialog(b.create())
     }
 
-    private fun onNew() {
-        dialog("새 스크립트를 만들까요? (저장하지 않은 내용은 사라집니다)", null, onOk = {
-            script = MacroScript()
-            highlighted = -1
-            refreshList()
-            setStatus("새 스크립트")
-        })
+    /** 스크립트 + 템플릿 이미지를 ZIP으로 추출 */
+    private fun exportScript(name: String) {
+        val result = BackupManager.export(service, service.store, name)
+        if (result == null) {
+            setStatus("«$name» 내보내기에 실패했습니다")
+            return
+        }
+        setStatus(result.savedTo?.let { "저장됨: $it" } ?: "백업 생성됨: ${result.file.name}")
+
+        val b = AlertDialog.Builder(ctx)
+        b.setTitle("백업을 만들었습니다")
+        b.setMessage(
+            buildString {
+                append("${result.file.name}\n")
+                result.savedTo?.let { append("\n기기에 저장됨: $it\n") }
+                append("\n스크립트와 템플릿 이미지가 모두 들어 있어 다른 기기에서도 복원됩니다.")
+            }
+        )
+        b.setPositiveButton("공유") { _, _ ->
+            service.setPanelVisible(false)
+            runCatching { BackupManager.share(service, result.file) }
+                .onFailure { setStatus("공유할 앱을 찾지 못했습니다") }
+        }
+        b.setNegativeButton("닫기", null)
+        showOverlayDialog(b.create())
+    }
+
+    private fun duplicateScript(name: String) {
+        val src = service.store.load(name)
+        if (src == null) {
+            setStatus("«$name» 을 읽을 수 없습니다")
+            return
+        }
+        src.name = service.store.uniqueName(name)
+        service.store.save(src)
+        setStatus("복제됨: ${src.name}")
+    }
+
+    private fun confirmDeleteScript(name: String) {
+        val b = AlertDialog.Builder(ctx)
+        b.setTitle("«$name» 삭제")
+        b.setMessage("저장본이 지워집니다. 되돌릴 수 없으니 필요하면 먼저 내보내기로 백업하세요.")
+        b.setPositiveButton("삭제") { _, _ ->
+            service.store.delete(name)
+            setStatus("삭제됨: $name")
+        }
+        b.setNeutralButton("내보내고 삭제") { _, _ ->
+            BackupManager.export(service, service.store, name)
+            service.store.delete(name)
+            setStatus("백업 후 삭제됨: $name")
+        }
+        b.setNegativeButton("취소", null)
+        showOverlayDialog(b.create())
     }
 
     private fun renameDialog() {
@@ -469,6 +724,8 @@ class OverlayPanel(private val service: OverlayService) {
 
         // 액션 이름 — 모든 타입 공통, 비워두면 타입 이름으로 표시된다
         field("name", "액션 이름 (비우면 «${a.type.label}»)", a.name ?: "", numeric = false)
+        // 순서 — 번호를 바꾸면 그 자리로 이동한다 (분기 대상은 따라간다)
+        field("order", "순서 (1 ~ ${script.actions.size})", (index + 1).toString())
 
         when (a.type) {
             ActionType.TAP -> {
@@ -532,6 +789,13 @@ class OverlayPanel(private val service: OverlayService) {
             fields["onFail"]?.let { a.onFailureGoto = uiToGoto(num("onFail", -1).toInt()) }
             fields["post"]?.let { a.postDelayMs = num("post", a.postDelayMs).coerceAtLeast(0) }
             clickBox?.let { a.clickOnFound = it.isChecked }
+
+            // 분기 값을 먼저 확정한 뒤 이동시켜야 대상이 어긋나지 않는다
+            val newPos = num("order", (index + 1).toLong()).toInt() - 1
+            if (newPos != index) {
+                reorder(index, newPos)
+                setStatus("스텝 ${index + 1} → ${newPos.coerceIn(0, script.actions.size - 1) + 1} 로 이동")
+            }
             refreshList()
         })
     }

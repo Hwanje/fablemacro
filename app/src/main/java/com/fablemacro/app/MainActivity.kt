@@ -141,7 +141,8 @@ class MainActivity : Activity() {
         root.addView(updateCard)
 
         root.addView(TextView(this).apply {
-            text = "사용 순서: 버블 탭 → Action List에서 액션 추가 → ⚙ 로 이름/재시도(∞)/분기 설정 → ◎ 로 좌표 위치 확인 → ▶ 실행 (실행 중 버블 탭 = 중지)"
+            text = "사용 순서: 버블 탭 → Action List에서 액션 추가 → ⚙ 로 이름/순서/재시도(∞)/분기 설정 → ◎ 로 좌표 위치 확인 → ▶ 실행 (실행 중 버블 탭 = 중지)\n" +
+                    "📚 저장본 확인·백업 내보내기/가져오기 · ─ 패널 접기 · ✕ 오버레이 종료"
             textSize = 11f
             setTextColor(Color.GRAY)
             setPadding(0, dp(16), 0, 0)
