@@ -308,6 +308,8 @@ class ScriptStore(private val context: Context) {
         for (a in script.actions) {
             if (a.id.isNullOrBlank()) a.id = randomId()
             if (a.points == null) a.points = mutableListOf()
+            // 외부에서 온 파일명은 경로로 해석되지 않게 이름만 남긴다
+            a.imageFile = a.imageFile?.let { File(it).name }?.takeIf { it.isNotBlank() }
             val data = a.imageData
             a.imageData = null
             if (data.isNullOrBlank()) continue
