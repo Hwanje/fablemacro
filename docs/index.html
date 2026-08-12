@@ -1,0 +1,595 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FableMacro 매크로 카탈로그</title>
+<style>
+  :root{
+    --bg:#161616; --panel:#212121; --panel2:#2b2b2b; --line:#3a3a3a;
+    --text:#f0f0f0; --muted:#a8a8a8; --accent:#8bc34a; --accent-dim:#5f8a32;
+    --danger:#ff8a80; --radius:12px;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; background:var(--bg); color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans KR",sans-serif;
+    line-height:1.55;
+  }
+  a{color:var(--accent)}
+  header{padding:26px 18px 12px; max-width:1000px; margin:0 auto}
+  h1{margin:0; font-size:26px; color:var(--accent); letter-spacing:-.3px}
+  .sub{color:var(--muted); font-size:13px; margin-top:6px}
+  main{max-width:1000px; margin:0 auto; padding:0 18px 60px}
+
+  .bar{display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin:18px 0}
+  input,select,textarea{
+    background:var(--panel2); color:var(--text); border:1px solid var(--line);
+    border-radius:8px; padding:8px 10px; font-size:14px; font-family:inherit;
+  }
+  input:focus,select:focus,textarea:focus{outline:1px solid var(--accent-dim)}
+  #q{flex:1; min-width:180px}
+  button{
+    background:var(--panel2); color:var(--text); border:1px solid var(--line);
+    border-radius:8px; padding:8px 13px; font-size:14px; cursor:pointer;
+    font-family:inherit;
+  }
+  button:hover{border-color:var(--accent-dim)}
+  button.primary{background:var(--accent); color:#12200a; border-color:var(--accent); font-weight:700}
+  button.ghost{background:transparent}
+  button.danger{color:var(--danger)}
+  button.sm{padding:4px 9px; font-size:13px}
+
+  .grid{display:grid; grid-template-columns:repeat(auto-fill,minmax(260px,1fr)); gap:12px}
+  .card{
+    background:var(--panel); border:1px solid var(--line); border-radius:var(--radius);
+    padding:14px; cursor:pointer; transition:border-color .15s;
+  }
+  .card:hover{border-color:var(--accent-dim)}
+  .card h3{margin:0 0 4px; font-size:16px}
+  .card p{margin:0; color:var(--muted); font-size:13px}
+  .meta{margin-top:9px; font-size:12px; color:var(--muted)}
+  .tags{margin-top:8px; display:flex; gap:5px; flex-wrap:wrap}
+  .tag{background:var(--panel2); border:1px solid var(--line); border-radius:999px; padding:1px 9px; font-size:11px; color:var(--muted)}
+
+  .panel{background:var(--panel); border:1px solid var(--line); border-radius:var(--radius); padding:16px; margin-bottom:14px}
+  .panel h2{margin:0 0 4px; font-size:19px}
+  .row{display:flex; gap:8px; flex-wrap:wrap; align-items:center}
+  .field{display:flex; flex-direction:column; gap:3px; margin-bottom:9px}
+  .field label{font-size:12px; color:var(--muted)}
+  .fields{display:grid; grid-template-columns:repeat(auto-fill,minmax(140px,1fr)); gap:9px}
+
+  .step{background:var(--panel2); border:1px solid var(--line); border-radius:10px; padding:11px; margin-bottom:9px}
+  .step-head{display:flex; gap:8px; align-items:center; margin-bottom:8px; flex-wrap:wrap}
+  .num{background:var(--accent); color:#12200a; border-radius:6px; padding:1px 8px; font-weight:700; font-size:13px}
+  .spacer{flex:1}
+  .hint{color:var(--muted); font-size:12px; margin:6px 0 0}
+  .warn{color:#ffcc80; font-size:13px}
+  code{background:var(--panel2); padding:2px 6px; border-radius:5px; font-size:12.5px; word-break:break-all}
+  textarea{width:100%; min-height:220px; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:12.5px}
+  .linkbox{display:flex; gap:8px; margin-top:8px}
+  .linkbox input{flex:1; font-family:ui-monospace,monospace; font-size:12px}
+  .empty{color:var(--muted); text-align:center; padding:40px 0}
+  .toast{
+    position:fixed; left:50%; bottom:26px; transform:translateX(-50%);
+    background:var(--accent); color:#12200a; padding:10px 18px; border-radius:999px;
+    font-weight:700; font-size:14px; opacity:0; pointer-events:none; transition:opacity .2s;
+  }
+  .toast.on{opacity:1}
+  .hide{display:none !important}
+  @media (max-width:520px){ h1{font-size:22px} }
+</style>
+</head>
+<body>
+<header>
+  <h1>FableMacro 매크로 카탈로그</h1>
+  <div class="sub">
+    매크로를 골라 <b>앱으로 가져오기</b>를 누르면 폰의 FableMacro에 바로 등록됩니다.
+    여기서 단계를 고쳐 나만의 링크를 만들 수도 있습니다.
+  </div>
+</header>
+
+<main>
+  <!-- 목록 -->
+  <section id="listView">
+    <div class="bar">
+      <input id="q" placeholder="이름 · 설명 · 태그로 검색">
+      <button id="newBtn">＋ 새 매크로</button>
+      <button id="pasteBtn" class="ghost">JSON 붙여넣기</button>
+    </div>
+    <div id="grid" class="grid"></div>
+    <div id="listEmpty" class="empty hide"></div>
+    <p class="hint">
+      앱 설치: <a href="https://github.com/Hwanje/fablemacro/releases/latest">최신 APK 내려받기</a> ·
+      소스: <a href="https://github.com/Hwanje/fablemacro">GitHub</a>
+    </p>
+  </section>
+
+  <!-- 편집기 -->
+  <section id="editView" class="hide">
+    <div class="bar">
+      <button id="backBtn">← 목록</button>
+      <span class="spacer"></span>
+      <button id="jsonBtn" class="ghost">JSON 보기</button>
+    </div>
+
+    <div class="panel">
+      <div class="field">
+        <label>매크로 이름</label>
+        <input id="mName" placeholder="예: 출석 체크 자동화">
+      </div>
+      <div class="field">
+        <label>설명</label>
+        <input id="mDesc" placeholder="이 매크로가 하는 일을 한 줄로">
+      </div>
+      <div class="field">
+        <label>태그 (쉼표로 구분)</label>
+        <input id="mTags" placeholder="게임, 반복">
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="row" style="margin-bottom:10px">
+        <h2 style="margin:0">단계</h2>
+        <span class="spacer"></span>
+        <select id="addType"></select>
+        <button id="addBtn">＋ 추가</button>
+      </div>
+      <div id="steps"></div>
+      <p class="hint">
+        분기 값 — <code>0</code> 다음 단계 · <code>-1</code> 중지 · <code>3</code> 3번 단계로 점프.
+        순서를 바꾸면 분기 대상도 함께 따라갑니다.
+      </p>
+    </div>
+
+    <div class="panel">
+      <h2>앱으로 보내기</h2>
+      <p class="hint" id="linkNote">아래 링크를 폰에서 열면 FableMacro가 이 매크로를 가져옵니다.</p>
+      <div class="linkbox">
+        <input id="shareLink" readonly>
+        <button id="copyBtn" class="primary">복사</button>
+      </div>
+      <div class="row" style="margin-top:10px">
+        <a id="openApp" class="ghost"><button>📱 앱으로 가져오기</button></a>
+        <button id="dlBtn" class="ghost">JSON 내려받기</button>
+        <button id="ghBtn" class="ghost">GitHub에 저장</button>
+      </div>
+      <p class="hint" id="sizeWarn"></p>
+    </div>
+
+    <div class="panel hide" id="jsonPanel">
+      <h2>JSON</h2>
+      <textarea id="jsonArea" spellcheck="false"></textarea>
+      <div class="row" style="margin-top:8px">
+        <button id="applyJson" class="primary">JSON 적용</button>
+        <span id="jsonMsg" class="warn"></span>
+      </div>
+    </div>
+  </section>
+</main>
+
+<div id="toast" class="toast"></div>
+
+<script>
+"use strict";
+
+const REPO = "Hwanje/fablemacro";
+const GOTO = { NEXT: 0, STOP: -1 };
+
+/* 앱의 ActionType과 1:1로 맞춘 단계 정의 */
+const TYPES = {
+  TAP:          { label:"탭",             emoji:"👆", fields:["x","y","repeatCount","durationMs"] },
+  SWIPE:        { label:"스와이프",        emoji:"👉", fields:["x","y","x2","y2","durationMs"] },
+  PATH:         { label:"경로",            emoji:"〰️", fields:["points","durationMs"] },
+  DELAY:        { label:"딜레이",          emoji:"⏱", fields:["delayMs"] },
+  SEARCH_IMAGE: { label:"이미지 검색",      emoji:"🖼", fields:["threshold","maxAttempts","retryIntervalMs","clickOnFound"], search:true },
+  SEARCH_TEXT:  { label:"텍스트 검색",      emoji:"🔎", fields:["text","maxAttempts","retryIntervalMs","clickOnFound"], search:true },
+  OCR_COPY:     { label:"텍스트 OCR 복사",  emoji:"📋", fields:["region"] },
+  PASTE_TEXT:   { label:"텍스트 붙여넣기",  emoji:"📝", fields:["text"] },
+  OPEN_APP:     { label:"앱 실행",         emoji:"📱", fields:["packageName","appLabel"] },
+  BACK:         { label:"뒤로가기",        emoji:"◀", fields:[] },
+  HOME:         { label:"홈",              emoji:"⌂", fields:[] },
+  RECENTS:      { label:"최근 앱",         emoji:"▢", fields:[] },
+  RANDOM_TAP:   { label:"랜덤 탭",         emoji:"🎲", fields:["region","durationMs"] },
+};
+
+const FIELDS = {
+  x:{l:"X 좌표",t:"int"}, y:{l:"Y 좌표",t:"int"},
+  x2:{l:"끝 X",t:"int"}, y2:{l:"끝 Y",t:"int"},
+  durationMs:{l:"지속시간 (ms)",t:"int"}, delayMs:{l:"딜레이 (ms)",t:"int"},
+  repeatCount:{l:"반복 횟수",t:"int"}, threshold:{l:"임계값 (0.5~0.99)",t:"float"},
+  text:{l:"텍스트",t:"str"}, packageName:{l:"패키지명",t:"str"}, appLabel:{l:"앱 이름",t:"str"},
+  maxAttempts:{l:"재시도 (-1 = 무한)",t:"int"}, retryIntervalMs:{l:"재시도 간격 (ms)",t:"int"},
+  clickOnFound:{l:"찾은 위치 클릭",t:"bool"},
+  region:{l:"영역 [좌,상,우,하]",t:"ints"}, points:{l:"지점 [[x,y],…]",t:"pairs"},
+};
+
+function newAction(type){
+  return {
+    id: rid(), type, name:null,
+    x:0, y:0, x2:0, y2:0, points:[],
+    durationMs:120, delayMs:1000,
+    imageFile:null, threshold:0.85, text:null, region:null,
+    packageName:null, appLabel:null,
+    clickOnFound:true, maxAttempts:-1, retryIntervalMs:1000,
+    postDelayMs:300, onSuccessGoto:GOTO.NEXT,
+    onFailureGoto: TYPES[type].search ? GOTO.STOP : GOTO.STOP,
+    repeatCount:1, imageData:null,
+  };
+}
+function rid(){
+  const c="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+  return Array.from({length:8},()=>c[Math.floor(Math.random()*c.length)]).join("");
+}
+
+let catalog = [];
+let macro = null;      // 편집 중인 매크로
+let macroId = null;    // 카탈로그에서 열었을 때의 id
+
+const $ = s => document.querySelector(s);
+const el = (t,p={}) => Object.assign(document.createElement(t), p);
+
+function toast(msg){
+  const t=$("#toast"); t.textContent=msg; t.classList.add("on");
+  setTimeout(()=>t.classList.remove("on"), 1600);
+}
+
+/* ───────── 목록 ───────── */
+async function loadCatalog(){
+  try{
+    const res = await fetch("macros/index.json", {cache:"no-cache"});
+    if(!res.ok) throw new Error(res.status);
+    const data = await res.json();
+    catalog = Array.isArray(data) ? data : (data.macros || []);
+  }catch(e){
+    catalog = [];
+  }
+  renderList();
+}
+
+function renderList(){
+  const q = $("#q").value.trim().toLowerCase();
+  const grid = $("#grid"); grid.innerHTML="";
+  const items = catalog.filter(m=>{
+    if(!q) return true;
+    return [m.name, m.description, (m.tags||[]).join(" ")]
+      .filter(Boolean).join(" ").toLowerCase().includes(q);
+  });
+
+  $("#listEmpty").classList.toggle("hide", items.length>0);
+  if(items.length===0){
+    $("#listEmpty").innerHTML = catalog.length===0
+      ? "아직 등록된 매크로가 없습니다.<br>‘＋ 새 매크로’로 만들어 링크를 뽑거나 GitHub에 올려보세요."
+      : "검색 결과가 없습니다.";
+  }
+
+  for(const m of items){
+    const card = el("div",{className:"card"});
+    card.appendChild(el("h3",{textContent:m.name||m.id}));
+    if(m.description) card.appendChild(el("p",{textContent:m.description}));
+    card.appendChild(el("div",{className:"meta", textContent:`단계 ${m.steps||0}개`}));
+    if(m.tags && m.tags.length){
+      const tags = el("div",{className:"tags"});
+      m.tags.forEach(t=>tags.appendChild(el("span",{className:"tag",textContent:t})));
+      card.appendChild(tags);
+    }
+    card.onclick = ()=>{ location.hash = "#/m/"+m.id; };
+    grid.appendChild(card);
+  }
+}
+
+/* ───────── 편집기 ───────── */
+function showList(){
+  $("#listView").classList.remove("hide");
+  $("#editView").classList.add("hide");
+}
+
+function openEditor(m, id){
+  macro = normalize(m);
+  macroId = id || null;
+  $("#listView").classList.add("hide");
+  $("#editView").classList.remove("hide");
+  $("#mName").value = macro.name || "";
+  $("#mDesc").value = macro.description || "";
+  $("#mTags").value = (macro.tags||[]).join(", ");
+  renderSteps();
+  window.scrollTo(0,0);
+}
+
+function normalize(m){
+  const out = Object.assign({name:"새 매크로", description:"", tags:[], actions:[]}, m||{});
+  out.tags = out.tags || [];
+  out.actions = (out.actions||[]).filter(a=>a && TYPES[a.type])
+    .map(a=>Object.assign(newAction(a.type), a));
+  return out;
+}
+
+function renderSteps(){
+  const box = $("#steps"); box.innerHTML="";
+  if(macro.actions.length===0){
+    box.appendChild(el("p",{className:"hint",textContent:"위에서 종류를 고르고 ‘＋ 추가’를 눌러 단계를 만드세요."}));
+  }
+  macro.actions.forEach((a,i)=>box.appendChild(stepCard(a,i)));
+  updateShare();
+}
+
+function stepCard(a, i){
+  const def = TYPES[a.type];
+  const card = el("div",{className:"step"});
+
+  const head = el("div",{className:"step-head"});
+  head.appendChild(el("span",{className:"num",textContent:String(i+1)}));
+  head.appendChild(el("span",{textContent:def.emoji+" "+def.label}));
+
+  const nameIn = el("input",{value:a.name||"", placeholder:"단계 이름 (선택)"});
+  nameIn.style.flex="1"; nameIn.style.minWidth="120px";
+  nameIn.oninput = ()=>{ a.name = nameIn.value.trim() || null; updateShare(); };
+  head.appendChild(nameIn);
+
+  const up = el("button",{className:"sm ghost",textContent:"↑",title:"위로"});
+  up.onclick = ()=>moveStep(i,-1);
+  const dn = el("button",{className:"sm ghost",textContent:"↓",title:"아래로"});
+  dn.onclick = ()=>moveStep(i,+1);
+  const del = el("button",{className:"sm danger",textContent:"삭제"});
+  del.onclick = ()=>removeStep(i);
+  head.append(up,dn,del);
+  card.appendChild(head);
+
+  const fields = el("div",{className:"fields"});
+  for(const key of def.fields) fields.appendChild(fieldFor(a,key));
+  // 공통 필드
+  fields.appendChild(fieldFor(a,"__onSuccess"));
+  if(def.search) fields.appendChild(fieldFor(a,"__onFailure"));
+  fields.appendChild(fieldFor(a,"__post"));
+  card.appendChild(fields);
+
+  if(a.type==="SEARCH_IMAGE" && !a.imageData && !a.imageFile){
+    card.appendChild(el("p",{className:"warn",
+      textContent:"⚠ 찾을 이미지가 없습니다. 이미지 검색 단계는 폰에서 화면 영역을 캡처해 지정해야 동작합니다."}));
+  }
+  return card;
+}
+
+function fieldFor(a, key){
+  const wrap = el("div",{className:"field"});
+  let label, input;
+
+  if(key==="__onSuccess"){ label="성공 시 이동"; input=gotoInput(a,"onSuccessGoto"); }
+  else if(key==="__onFailure"){ label="실패 시 이동"; input=gotoInput(a,"onFailureGoto"); }
+  else if(key==="__post"){ label="실행 후 대기 (ms)"; input=numInput(a,"postDelayMs","int"); }
+  else {
+    const meta = FIELDS[key]; label = meta.l;
+    if(meta.t==="bool"){
+      input = el("select");
+      [["true","예"],["false","아니오"]].forEach(([v,t])=>input.appendChild(el("option",{value:v,textContent:t})));
+      input.value = String(!!a[key]);
+      input.onchange = ()=>{ a[key] = input.value==="true"; updateShare(); };
+    } else if(meta.t==="str"){
+      input = el("input",{value:a[key]==null?"":a[key]});
+      input.oninput = ()=>{ a[key] = input.value===""?null:input.value; updateShare(); };
+    } else if(meta.t==="ints" || meta.t==="pairs"){
+      input = el("input",{
+        value: a[key]==null ? "" : JSON.stringify(a[key]),
+        placeholder: meta.t==="ints" ? "[0,0,1080,600]" : "[[100,200],[300,400]]"
+      });
+      input.oninput = ()=>{
+        const raw = input.value.trim();
+        if(raw===""){ a[key] = meta.t==="pairs" ? [] : null; updateShare(); return; }
+        try{ a[key] = JSON.parse(raw); input.style.borderColor=""; }
+        catch(e){ input.style.borderColor="var(--danger)"; }
+        updateShare();
+      };
+    } else {
+      input = numInput(a,key,meta.t);
+    }
+  }
+  wrap.appendChild(el("label",{textContent:label}));
+  wrap.appendChild(input);
+  return wrap;
+}
+
+function numInput(a,key,type){
+  const input = el("input",{type:"number", value:a[key]});
+  if(type==="float") input.step="0.01";
+  input.oninput = ()=>{
+    const v = type==="float" ? parseFloat(input.value) : parseInt(input.value,10);
+    if(!Number.isNaN(v)){ a[key]=v; updateShare(); }
+  };
+  return input;
+}
+
+/* 분기 값은 사용자에게 1-based 단계 번호로 보여준다 */
+function gotoInput(a,key){
+  const input = el("input",{type:"number", value: a[key]>=0 ? a[key]+1 : a[key]});
+  input.title = "0 = 다음 단계, -1 = 중지, n = n번 단계";
+  input.oninput = ()=>{
+    const v = parseInt(input.value,10);
+    if(Number.isNaN(v)) return;
+    a[key] = v===0 ? GOTO.NEXT : (v<0 ? GOTO.STOP : v-1);
+    updateShare();
+  };
+  return input;
+}
+
+/* 순서를 바꿔도 분기 대상이 원래 단계를 계속 가리키게 한다 */
+function withBranchTargets(fn){
+  const before = macro.actions.slice();
+  const refs = before.map(a=>({
+    s: a.onSuccessGoto>=0 ? (before[a.onSuccessGoto]||{}).id : null,
+    f: a.onFailureGoto>=0 ? (before[a.onFailureGoto]||{}).id : null,
+  }));
+  fn();
+  const idx = new Map(macro.actions.map((a,i)=>[a.id,i]));
+  before.forEach((a,k)=>{
+    if(refs[k].s!=null) a.onSuccessGoto = idx.has(refs[k].s) ? idx.get(refs[k].s) : GOTO.NEXT;
+    if(refs[k].f!=null) a.onFailureGoto = idx.has(refs[k].f) ? idx.get(refs[k].f) : GOTO.NEXT;
+  });
+}
+
+function moveStep(i, d){
+  const j=i+d;
+  if(j<0 || j>=macro.actions.length) return;
+  withBranchTargets(()=>{
+    const t=macro.actions[i]; macro.actions[i]=macro.actions[j]; macro.actions[j]=t;
+  });
+  renderSteps();
+}
+function removeStep(i){
+  withBranchTargets(()=>{ macro.actions.splice(i,1); });
+  renderSteps();
+}
+
+/* ───────── 링크 만들기 ───────── */
+function collect(){
+  macro.name = $("#mName").value.trim() || "새 매크로";
+  macro.description = $("#mDesc").value.trim();
+  macro.tags = $("#mTags").value.split(",").map(s=>s.trim()).filter(Boolean);
+  return macro;
+}
+
+function payloadOf(m){
+  const json = JSON.stringify(m);
+  const bytes = new TextEncoder().encode(json);
+  let bin=""; bytes.forEach(b=>bin+=String.fromCharCode(b));
+  return btoa(bin).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,"");
+}
+
+function updateShare(){
+  const m = collect();
+  // 카탈로그에서 연 매크로는 짧은 id 링크를, 편집본은 자기완결 링크를 준다
+  const dirty = macroId ? JSON.stringify(m) !== JSON.stringify(originalMacro) : true;
+  let link;
+  if(macroId && !dirty){
+    link = "fablemacro://import?m=" + macroId;
+    $("#linkNote").textContent = "이 링크를 폰에서 열면 FableMacro가 카탈로그에서 매크로를 받아옵니다.";
+  }else{
+    link = "fablemacro://import?p=" + payloadOf(m);
+    $("#linkNote").textContent = macroId
+      ? "내용을 고쳤으므로 매크로가 통째로 담긴 링크를 만들었습니다."
+      : "매크로가 통째로 담긴 링크입니다. 폰에서 열면 그대로 등록됩니다.";
+  }
+  $("#shareLink").value = link;
+  $("#openApp").href = link;
+
+  const kb = Math.round(link.length/1024);
+  $("#sizeWarn").textContent = link.length>3000
+    ? `링크가 깁니다 (약 ${kb}KB). 메신저에서 잘릴 수 있으니 JSON 내려받기를 쓰거나 GitHub에 저장해 짧은 링크를 만드세요.`
+    : "";
+  if($("#jsonPanel").classList.contains("hide")===false){
+    $("#jsonArea").value = JSON.stringify(m,null,2);
+  }
+}
+
+let originalMacro = null;
+
+/* ───────── 라우팅 ───────── */
+async function route(){
+  const h = location.hash || "";
+
+  const pm = h.match(/[#&?]p=([^&]+)/);
+  if(pm){
+    const m = decodePayload(pm[1]);
+    if(m){ originalMacro=null; openEditor(m,null); return; }
+  }
+
+  const mm = h.match(/^#\/m\/([A-Za-z0-9_-]+)/);
+  if(mm){
+    const id = mm[1];
+    try{
+      const res = await fetch("macros/"+id+".json",{cache:"no-cache"});
+      if(!res.ok) throw new Error(res.status);
+      const data = await res.json();
+      originalMacro = JSON.parse(JSON.stringify(normalize(data)));
+      openEditor(data, id);
+    }catch(e){
+      toast("매크로를 불러오지 못했습니다");
+      location.hash = "";
+    }
+    return;
+  }
+
+  if(h==="#/new"){
+    originalMacro = null;
+    openEditor({name:"새 매크로", description:"", tags:[], actions:[]}, null);
+    return;
+  }
+
+  showList();
+  renderList();
+}
+
+function decodePayload(p){
+  try{
+    const b64 = p.replace(/-/g,"+").replace(/_/g,"/");
+    const bin = atob(b64);
+    const bytes = Uint8Array.from(bin, c=>c.charCodeAt(0));
+    return JSON.parse(new TextDecoder().decode(bytes));
+  }catch(e){ return null; }
+}
+
+/* ───────── 이벤트 ───────── */
+$("#q").oninput = renderList;
+$("#newBtn").onclick = ()=>{ location.hash="#/new"; };
+$("#backBtn").onclick = ()=>{ location.hash=""; };
+$("#addBtn").onclick = ()=>{
+  macro.actions.push(newAction($("#addType").value));
+  renderSteps();
+};
+$("#copyBtn").onclick = async ()=>{
+  const v = $("#shareLink").value;
+  try{ await navigator.clipboard.writeText(v); }
+  catch(e){ $("#shareLink").select(); document.execCommand("copy"); }
+  toast("링크를 복사했습니다");
+};
+$("#dlBtn").onclick = ()=>{
+  const m = collect();
+  const blob = new Blob([JSON.stringify(m,null,2)],{type:"application/json"});
+  const a = el("a",{href:URL.createObjectURL(blob), download:(macroId||slug(m.name))+".json"});
+  a.click(); URL.revokeObjectURL(a.href);
+};
+$("#ghBtn").onclick = ()=>{
+  const m = collect();
+  const body = encodeURIComponent(JSON.stringify(m,null,2));
+  const file = (macroId || slug(m.name)) + ".json";
+  const url = macroId
+    ? `https://github.com/${REPO}/edit/main/docs/macros/${file}`
+    : `https://github.com/${REPO}/new/main/docs/macros?filename=${encodeURIComponent(file)}&value=${body}`;
+  window.open(url,"_blank");
+};
+$("#jsonBtn").onclick = ()=>{
+  const p = $("#jsonPanel");
+  p.classList.toggle("hide");
+  if(!p.classList.contains("hide")) $("#jsonArea").value = JSON.stringify(collect(),null,2);
+};
+$("#applyJson").onclick = ()=>{
+  try{
+    const parsed = JSON.parse($("#jsonArea").value);
+    $("#jsonMsg").textContent = "";
+    openEditor(parsed, macroId);
+    toast("적용했습니다");
+  }catch(e){
+    $("#jsonMsg").textContent = "JSON 형식이 올바르지 않습니다";
+  }
+};
+$("#pasteBtn").onclick = ()=>{
+  const raw = prompt("매크로 JSON을 붙여넣으세요");
+  if(!raw) return;
+  try{ originalMacro=null; openEditor(JSON.parse(raw), null); }
+  catch(e){ toast("JSON 형식이 올바르지 않습니다"); }
+};
+["mName","mDesc","mTags"].forEach(id=>{ $("#"+id).oninput = updateShare; });
+
+function slug(s){
+  return (s||"macro").toLowerCase().replace(/[^a-z0-9가-힣]+/g,"-").replace(/^-|-$/g,"").slice(0,40) || "macro";
+}
+
+/* 단계 종류 선택지 채우기 */
+for(const [k,v] of Object.entries(TYPES)){
+  $("#addType").appendChild(el("option",{value:k, textContent:v.emoji+" "+v.label}));
+}
+
+window.addEventListener("hashchange", route);
+loadCatalog().then(route);
+</script>
+</body>
+</html>

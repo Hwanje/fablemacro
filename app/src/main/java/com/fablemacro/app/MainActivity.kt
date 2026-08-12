@@ -18,6 +18,7 @@ import android.widget.ProgressBar
 import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
+import com.fablemacro.app.online.MacroLink
 import com.fablemacro.app.update.UpdateChecker
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -139,6 +140,38 @@ class MainActivity : Activity() {
         updateCard.addView(updateStatus)
         updateCard.addView(updateBtn)
         root.addView(updateCard)
+
+        // 5. 매크로 카탈로그
+        val catalogCard = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            background = rounded("#FF262626")
+            setPadding(dp(16), dp(14), dp(16), dp(14))
+            layoutParams = marginLp()
+        }
+        catalogCard.addView(TextView(this).apply {
+            text = "매크로 카탈로그"
+            textSize = 15f
+            setTextColor(Color.WHITE)
+            setTypeface(null, Typeface.BOLD)
+        })
+        catalogCard.addView(TextView(this).apply {
+            text = "웹에서 매크로를 고르고 «앱으로 가져오기»를 누르면 바로 등록됩니다.\n" +
+                    "받은 링크는 오버레이 📚 → 링크로 가져오기 에서도 열 수 있습니다."
+            textSize = 12f
+            setTextColor(Color.LTGRAY)
+            setPadding(0, dp(4), 0, dp(10))
+        })
+        catalogCard.addView(Button(this).apply {
+            text = "카탈로그 열기"
+            setOnClickListener {
+                runCatching {
+                    startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(MacroLink.SITE)))
+                }.onFailure {
+                    Toast.makeText(this@MainActivity, "브라우저를 열지 못했습니다", Toast.LENGTH_SHORT).show()
+                }
+            }
+        })
+        root.addView(catalogCard)
 
         root.addView(TextView(this).apply {
             text = "사용 순서: 버블 탭 → Action List에서 액션 추가 → ⚙ 로 이름/순서/재시도(∞)/분기 설정 → ◎ 로 좌표 위치 확인 → ▶ 실행 (실행 중 버블 탭 = 중지)\n" +

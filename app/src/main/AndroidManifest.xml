@@ -40,6 +40,20 @@
             android:excludeFromRecents="true"
             android:theme="@android:style/Theme.Translucent.NoTitleBar" />
 
+        <!-- 매크로 링크(fablemacro://import?…)를 눌렀을 때 여는 화면 -->
+        <activity
+            android:name=".online.ImportLinkActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="fablemacro" />
+            </intent-filter>
+        </activity>
+
         <service
             android:name=".OverlayService"
             android:exported="false"

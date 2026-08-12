@@ -3,6 +3,7 @@ package com.fablemacro.app.model
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.util.Base64
 import com.google.gson.Gson
 import com.google.gson.GsonBuilder
 import java.io.File
@@ -83,6 +84,9 @@ data class MacroAction(
     var onFailureGoto: Int = Goto.STOP,
     // TAP 반복 횟수
     var repeatCount: Int = 1,
+    // 링크/웹으로 주고받을 때만 쓰는 템플릿 이미지 본문 (base64 PNG).
+    // 기기에 저장할 때는 imageFile로 풀어 쓰고 이 값은 비운다.
+    var imageData: String? = null,
 ) {
     /** 리스트 제목에 쓸 이름 — 지정한 이름이 없으면 타입 이름 */
     fun displayName(): String = name?.takeIf { it.isNotBlank() } ?: type.label
@@ -125,6 +129,9 @@ data class MacroAction(
 data class MacroScript(
     var name: String = "새 스크립트",
     var actions: MutableList<MacroAction> = mutableListOf(),
+    // 카탈로그/웹에서 쓰는 설명과 태그 (앱 동작에는 영향 없음)
+    var description: String? = null,
+    var tags: MutableList<String> = mutableListOf(),
 )
 
 /** 스크립트(JSON)와 템플릿 이미지(PNG) 저장소 */
@@ -264,4 +271,56 @@ class ScriptStore(private val context: Context) {
 
     /** 저장하지 않은 변경이 있는지 비교하기 위한 스냅샷 */
     fun snapshot(script: MacroScript): String = gson.toJson(script)
+
+    // ─────────────── 링크/웹 공유용 JSON ───────────────
+
+    /**
+     * 링크나 웹으로 넘길 JSON. 템플릿 이미지를 base64로 본문에 담아
+     * 받는 쪽에 이미지 파일이 없어도 그대로 동작하게 한다.
+     */
+    fun toShareJson(script: MacroScript): String {
+        val copy = gson.fromJson(gson.toJson(script), MacroScript::class.java)
+        for (a in copy.actions) {
+            val img = a.imageFile ?: continue
+            val f = File(imageDir, img)
+            if (f.exists()) {
+                a.imageData = Base64.encodeToString(f.readBytes(), Base64.NO_WRAP)
+            }
+        }
+        return gson.toJson(copy)
+    }
+
+    /**
+     * 링크/웹에서 받은 JSON을 저장본으로 만든다.
+     * 항상 새 이름으로 저장하므로 기존 저장본을 덮어쓰지 않는다.
+     * 외부에서 온 값이라 타입이 빠졌거나 목록이 없는 경우까지 걸러낸다.
+     */
+    @Suppress("SENSELESS_COMPARISON")
+    fun fromShareJson(json: String): MacroScript? {
+        val script = runCatching { gson.fromJson(json, MacroScript::class.java) }.getOrNull()
+            ?: return null
+        if (script.actions == null) script.actions = mutableListOf()
+        if (script.tags == null) script.tags = mutableListOf()
+        // 타입이 없는 항목은 실행할 수 없으므로 제외
+        script.actions = script.actions.filter { it != null && it.type != null }.toMutableList()
+        if (script.actions.isEmpty()) return null
+
+        for (a in script.actions) {
+            if (a.id.isNullOrBlank()) a.id = randomId()
+            if (a.points == null) a.points = mutableListOf()
+            val data = a.imageData
+            a.imageData = null
+            if (data.isNullOrBlank()) continue
+            val bytes = runCatching { Base64.decode(data, Base64.DEFAULT) }.getOrNull() ?: continue
+            val target = "${randomId()}.png"
+            runCatching {
+                File(imageDir, target).writeBytes(bytes)
+                a.imageFile = target
+            }
+        }
+
+        script.name = uniqueName(script.name?.ifBlank { null } ?: "가져온 매크로")
+        save(script)
+        return script
+    }
 }

@@ -5,6 +5,10 @@ name: Release APK
 on:
   push:
     branches: [main]
+    # 웹사이트/카탈로그만 바뀐 커밋은 APK가 그대로이므로 릴리스를 내지 않는다
+    paths-ignore:
+      - "docs/**"
+      - "README.md"
   workflow_dispatch:
 
 permissions:

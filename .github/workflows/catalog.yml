@@ -1,0 +1,66 @@
+name: Rebuild macro catalog
+
+# docs/macros/ 에 매크로 JSON을 추가/수정하면 목록(index.json)을 다시 만들어 커밋한다.
+# 웹사이트와 앱은 이 index.json을 읽어 카탈로그를 보여준다.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "docs/macros/**.json"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: catalog
+  cancel-in-progress: false
+
+jobs:
+  build-index:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Generate index.json
+        run: |
+          python3 - <<'PY'
+          import json, pathlib
+
+          d = pathlib.Path("docs/macros")
+          items = []
+          for f in sorted(d.glob("*.json")):
+              if f.name == "index.json":
+                  continue
+              try:
+                  m = json.loads(f.read_text(encoding="utf-8"))
+              except Exception as e:
+                  print(f"skip {f.name}: {e}")
+                  continue
+              items.append({
+                  "id": f.stem,
+                  "name": m.get("name") or f.stem,
+                  "description": m.get("description") or "",
+                  "steps": len(m.get("actions") or []),
+                  "tags": m.get("tags") or [],
+              })
+
+          out = d / "index.json"
+          out.write_text(
+              json.dumps({"macros": items}, ensure_ascii=False, indent=2) + "\n",
+              encoding="utf-8",
+          )
+          print(f"{len(items)} macros indexed")
+          PY
+
+      - name: Commit if changed
+        run: |
+          if git diff --quiet -- docs/macros/index.json; then
+            echo "index.json unchanged"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs/macros/index.json
+          git commit -m "Rebuild macro catalog index"
+          git push

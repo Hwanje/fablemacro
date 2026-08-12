@@ -25,6 +25,7 @@ import com.fablemacro.app.model.Goto
 import com.fablemacro.app.model.MacroAction
 import com.fablemacro.app.model.MacroScript
 import com.fablemacro.app.model.ScriptStore
+import com.fablemacro.app.online.MacroLink
 import kotlinx.coroutines.launch
 import kotlin.math.max
 import kotlin.math.min
@@ -396,15 +397,187 @@ class OverlayPanel(private val service: OverlayService) {
         val b = AlertDialog.Builder(ctx)
         b.setTitle("저장된 매크로 (${names.size}개)")
         b.setView(ScrollView(ctx).apply { addView(body) })
-        b.setPositiveButton("가져오기") { _, _ ->
-            service.setPanelVisible(false)
-            BackupManager.startImport(service)
-            setStatus("백업 파일을 선택하세요")
-        }
+        b.setPositiveButton("링크로 가져오기") { _, _ -> showLinkImport() }
+        b.setNeutralButton("백업 파일") { _, _ -> showBackupOptions() }
         b.setNegativeButton("닫기", null)
         val created = b.create()
         managerDialog = created
         showOverlayDialog(created)
+    }
+
+    private fun showBackupOptions() {
+        val b = AlertDialog.Builder(ctx)
+        b.setTitle("백업 파일")
+        b.setItems(arrayOf("백업 ZIP 가져오기", "웹 카탈로그 열기")) { _, which ->
+            service.setPanelVisible(false)
+            when (which) {
+                0 -> {
+                    BackupManager.startImport(service)
+                    setStatus("백업 파일을 선택하세요")
+                }
+                1 -> openCatalogSite()
+            }
+        }
+        b.setNegativeButton("취소", null)
+        showOverlayDialog(b.create())
+    }
+
+    private fun openCatalogSite() {
+        val intent = android.content.Intent(
+            android.content.Intent.ACTION_VIEW, android.net.Uri.parse(MacroLink.SITE)
+        ).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+        runCatching { service.startActivity(intent) }
+            .onFailure { setStatus("브라우저를 열지 못했습니다") }
+    }
+
+    // ───────────────────────── 링크로 매크로 가져오기 ─────────────────────────
+
+    /** 매크로 링크 / JSON 주소 / JSON 본문을 받아 저장한다 */
+    private fun showLinkImport() {
+        val input = EditText(ctx).apply {
+            hint = "fablemacro://… 또는 https://… 링크 붙여넣기"
+            setText(clipboardLink().orEmpty())
+        }
+        val layout = LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(16), dp(8), dp(16), dp(8))
+            addView(TextView(ctx).apply {
+                text = "받은 매크로 링크를 붙여넣으세요.\n매크로 JSON 본문을 그대로 붙여넣어도 됩니다."
+                textSize = 12f
+            })
+            addView(input)
+        }
+
+        val b = AlertDialog.Builder(ctx)
+        b.setTitle("링크로 매크로 가져오기")
+        b.setView(layout)
+        b.setPositiveButton("가져오기") { _, _ -> importFromLink(input.text.toString()) }
+        b.setNeutralButton("카탈로그에서 고르기") { _, _ -> showCatalogPicker() }
+        b.setNegativeButton("취소", null)
+        showOverlayDialog(b.create())
+    }
+
+    /** 공개 카탈로그 목록을 받아 바로 고를 수 있게 한다 */
+    private fun showCatalogPicker() {
+        setStatus("카탈로그를 받아오는 중…")
+        service.uiScope.launch {
+            val entries = MacroLink.fetchCatalog()
+            if (entries.isNullOrEmpty()) {
+                setStatus("카탈로그를 가져오지 못했습니다")
+                return@launch
+            }
+            setStatus("카탈로그 ${entries.size}개")
+            val labels = entries.map { e ->
+                buildString {
+                    append(e.name.ifBlank { e.id })
+                    append("  (${e.steps}스텝)")
+                    e.description?.takeIf { it.isNotBlank() }?.let { append("\n").append(it) }
+                }
+            }.toTypedArray()
+
+            val b = AlertDialog.Builder(ctx)
+            b.setTitle("매크로 카탈로그")
+            b.setItems(labels) { _, which ->
+                importFromLink(MacroLink.macroUrl(entries[which].id))
+            }
+            b.setNeutralButton("웹에서 보기") { _, _ ->
+                service.setPanelVisible(false)
+                openCatalogSite()
+            }
+            b.setNegativeButton("닫기", null)
+            showOverlayDialog(b.create())
+        }
+    }
+
+    /** 클립보드에 링크처럼 보이는 값이 있으면 미리 채워준다 */
+    private fun clipboardLink(): String? {
+        val cm = service.getSystemService(android.content.ClipboardManager::class.java) ?: return null
+        val text = cm.primaryClip?.takeIf { it.itemCount > 0 }
+            ?.getItemAt(0)?.coerceToText(service)?.toString()?.trim() ?: return null
+        return text.takeIf {
+            it.startsWith("fablemacro://") || it.startsWith("http://") ||
+                    it.startsWith("https://") || it.startsWith("{")
+        }
+    }
+
+    private fun importFromLink(input: String) {
+        if (input.isBlank()) {
+            setStatus("링크를 입력해주세요")
+            return
+        }
+        setStatus("매크로를 받아오는 중…")
+        service.uiScope.launch {
+            val json = MacroLink.resolve(input)
+            if (json == null) {
+                setStatus("링크에서 매크로를 읽지 못했습니다")
+                return@launch
+            }
+            val saved = service.store.fromShareJson(json)
+            if (saved == null) {
+                setStatus("매크로 내용이 올바르지 않습니다")
+                return@launch
+            }
+            setStatus("저장됨: ${saved.name}")
+            confirmLoadImported(saved)
+        }
+    }
+
+    private fun confirmLoadImported(saved: MacroScript) {
+        val b = AlertDialog.Builder(ctx)
+        b.setTitle("가져왔습니다: ${saved.name}")
+        b.setMessage(
+            buildString {
+                saved.description?.takeIf { it.isNotBlank() }?.let { append(it).append("\n\n") }
+                append("스텝 ${saved.actions.size}개\n")
+                saved.actions.take(10).forEachIndexed { i, a ->
+                    append("\n${i + 1}. ${a.type.emoji} ${a.displayName()}   ${a.summary()}")
+                }
+                if (saved.actions.size > 10) append("\n… 외 ${saved.actions.size - 10}개")
+                append("\n\n지금 편집기로 불러올까요?")
+            }
+        )
+        b.setPositiveButton("불러오기") { _, _ ->
+            confirmDiscard("불러오기") {
+                script = saved
+                highlighted = -1
+                markSaved()
+                refreshList()
+                setStatus("불러옴: ${saved.name}")
+            }
+        }
+        b.setNegativeButton("나중에", null)
+        showOverlayDialog(b.create())
+    }
+
+    /** 현재 편집 중인 스크립트를 공유 링크로 만든다 */
+    private fun shareAsLink(name: String) {
+        val saved = service.store.load(name) ?: run {
+            setStatus("«$name» 을 읽을 수 없습니다")
+            return
+        }
+        val json = service.store.toShareJson(saved)
+        val payload = android.util.Base64.encodeToString(
+            json.toByteArray(), android.util.Base64.URL_SAFE or android.util.Base64.NO_WRAP
+        )
+        val link = "fablemacro://import?p=$payload"
+
+        val b = AlertDialog.Builder(ctx)
+        b.setTitle("공유 링크")
+        b.setMessage(
+            if (link.length > 3000) {
+                "이 매크로는 템플릿 이미지가 커서 링크가 매우 깁니다 (${link.length / 1024}KB).\n" +
+                        "메신저로 보낼 때는 백업 ZIP 내보내기를 쓰는 편이 안전합니다."
+            } else {
+                "링크를 복사해 다른 기기의 FableMacro에서 열면 그대로 가져옵니다."
+            }
+        )
+        b.setPositiveButton("복사") { _, _ ->
+            val cm = service.getSystemService(android.content.ClipboardManager::class.java)
+            cm?.setPrimaryClip(android.content.ClipData.newPlainText("FableMacro", link))
+            setStatus("링크를 복사했습니다")
+        }
+        b.setNegativeButton("닫기", null)
+        showOverlayDialog(b.create())
     }
 
     private fun describe(i: ScriptStore.ScriptInfo): String {
@@ -477,11 +650,12 @@ class OverlayPanel(private val service: OverlayService) {
     private fun showScriptActions(name: String) {
         val b = AlertDialog.Builder(ctx)
         b.setTitle(name)
-        b.setItems(arrayOf("백업 내보내기", "복제", "삭제")) { _, which ->
+        b.setItems(arrayOf("백업 내보내기", "공유 링크 만들기", "복제", "삭제")) { _, which ->
             when (which) {
                 0 -> exportScript(name)
-                1 -> duplicateScript(name)
-                2 -> confirmDeleteScript(name)
+                1 -> shareAsLink(name)
+                2 -> duplicateScript(name)
+                3 -> confirmDeleteScript(name)
             }
         }
         b.setNegativeButton("취소", null)
