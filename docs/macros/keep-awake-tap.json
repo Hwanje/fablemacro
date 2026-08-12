@@ -1,7 +1,10 @@
 {
   "name": "화면 유지 (주기적 탭)",
   "description": "30초마다 화면 한 곳을 가볍게 탭해 절전/자동 로그아웃을 막습니다. 탭 좌표는 가져온 뒤 ⚙ 또는 ◎ 로 확인해 맞춰주세요.",
-  "tags": ["기본", "반복"],
+  "tags": [
+    "기본",
+    "반복"
+  ],
   "actions": [
     {
       "id": "keepawk1",
@@ -24,8 +27,8 @@
       "maxAttempts": -1,
       "retryIntervalMs": 1000,
       "postDelayMs": 300,
-      "onSuccessGoto": 0,
-      "onFailureGoto": -1,
+      "onSuccessGoto": -1,
+      "onFailureGoto": -2,
       "repeatCount": 1,
       "imageData": null
     },
@@ -51,7 +54,7 @@
       "retryIntervalMs": 1000,
       "postDelayMs": 0,
       "onSuccessGoto": 0,
-      "onFailureGoto": -1,
+      "onFailureGoto": -2,
       "repeatCount": 1,
       "imageData": null
     }

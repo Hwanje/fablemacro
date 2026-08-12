@@ -1,7 +1,10 @@
 {
   "name": "확인 버튼 찾아 누르기",
   "description": "화면에서 «확인» 글자를 계속 찾아 누르고, 누른 뒤 뒤로가기까지 합니다. 찾을 글자는 ⚙ 에서 원하는 값으로 바꿔 쓰세요.",
-  "tags": ["OCR", "기본"],
+  "tags": [
+    "OCR",
+    "기본"
+  ],
   "actions": [
     {
       "id": "findtxt1",
@@ -24,8 +27,8 @@
       "maxAttempts": 20,
       "retryIntervalMs": 1000,
       "postDelayMs": 800,
-      "onSuccessGoto": 0,
-      "onFailureGoto": -1,
+      "onSuccessGoto": -1,
+      "onFailureGoto": -2,
       "repeatCount": 1,
       "imageData": null
     },
@@ -50,8 +53,8 @@
       "maxAttempts": -1,
       "retryIntervalMs": 1000,
       "postDelayMs": 500,
-      "onSuccessGoto": -1,
-      "onFailureGoto": -1,
+      "onSuccessGoto": -2,
+      "onFailureGoto": -2,
       "repeatCount": 1,
       "imageData": null
     }

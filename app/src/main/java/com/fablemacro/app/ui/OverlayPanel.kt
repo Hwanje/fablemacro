@@ -52,6 +52,9 @@ class OverlayPanel(private val service: OverlayService) {
     /** 마지막으로 저장/불러온 시점의 내용 — 변경 여부 판단용 */
     private var savedSnapshot: String = ""
 
+    /** 열려 있는 스텝 설정 창 — 이미지 다시 지정할 때 닫기 위해 들고 있는다 */
+    private var settingsDialog: AlertDialog? = null
+
     private val darkBg = Color.parseColor("#F2242424")
     private val rowBg = Color.parseColor("#FF333333")
     private val accent = Color.parseColor("#FF8BC34A")
@@ -829,6 +832,13 @@ class OverlayPanel(private val service: OverlayService) {
 
     /** 화면에서 템플릿 이미지를 잘라 저장하고 SEARCH_IMAGE 액션 추가 */
     private fun captureTemplate(r: Rect) {
+        captureTemplateImage(r) { fileName ->
+            addAction(MacroAction(type = ActionType.SEARCH_IMAGE, imageFile = fileName))
+        }
+    }
+
+    /** 화면에서 영역을 잘라 템플릿 이미지로 저장하고 파일명을 넘겨준다 */
+    private fun captureTemplateImage(r: Rect, onSaved: (String) -> Unit) {
         service.setPanelVisible(false)
         service.uiScope.launch {
             val frame = service.captureClean()
@@ -846,8 +856,23 @@ class OverlayPanel(private val service: OverlayService) {
                 return@launch
             }
             val cropped = android.graphics.Bitmap.createBitmap(frame, left, top, right - left, bottom - top)
-            val fileName = service.store.saveImage(cropped)
-            addAction(MacroAction(type = ActionType.SEARCH_IMAGE, imageFile = fileName))
+            onSaved(service.store.saveImage(cropped))
+        }
+    }
+
+    /**
+     * 이미 있는 이미지 검색 스텝의 템플릿을 새로 지정한다.
+     * 링크로 받은 스켈레톤 매크로처럼 이미지가 비어 있는 스텝을 채울 때 쓴다.
+     */
+    private fun recaptureTemplate(index: Int) {
+        val a = script.actions.getOrNull(index) ?: return
+        pickRegion("«${a.displayName()}» 에 쓸 이미지 영역을 드래그로 지정하세요") { r ->
+            captureTemplateImage(r) { fileName ->
+                a.imageFile = fileName
+                refreshList()
+                setStatus("이미지 지정됨: ${a.displayName()}")
+                showSettings(index)
+            }
         }
     }
 
@@ -923,7 +948,21 @@ class OverlayPanel(private val service: OverlayService) {
             }
             ActionType.PATH -> field("dur", "전체 지속시간 (ms)", a.durationMs.toString())
             ActionType.DELAY -> field("delay", "딜레이 (ms)", a.delayMs.toString())
-            ActionType.SEARCH_IMAGE -> field("th", "매칭 임계값 (0.5~0.99)", a.threshold.toString())
+            ActionType.SEARCH_IMAGE -> {
+                // 링크로 받은 스켈레톤처럼 이미지가 비어 있는 스텝을 여기서 채울 수 있다
+                layout.addView(TextView(ctx).apply {
+                    text = if (a.imageFile == null) "⚠ 찾을 이미지가 아직 없습니다" else "찾을 이미지: ${a.imageFile}"
+                    textSize = 12f
+                })
+                layout.addView(android.widget.Button(ctx).apply {
+                    text = if (a.imageFile == null) "이미지 지정" else "이미지 다시 지정"
+                    setOnClickListener {
+                        settingsDialog?.dismiss()
+                        recaptureTemplate(index)
+                    }
+                })
+                field("th", "매칭 임계값 (0.5~0.99)", a.threshold.toString())
+            }
             ActionType.SEARCH_TEXT -> field("text", "찾을 텍스트", a.text ?: "", numeric = false)
             ActionType.PASTE_TEXT -> field("text", "텍스트 (비우면 클립보드)", a.text ?: "", numeric = false)
             ActionType.RANDOM_TAP -> field("dur", "탭 지속시간 (ms)", a.durationMs.toString())
@@ -948,7 +987,7 @@ class OverlayPanel(private val service: OverlayService) {
         field("post", "실행 후 대기 (ms)", a.postDelayMs.toString())
 
         val scroll = ScrollView(ctx).apply { addView(layout) }
-        dialog("스텝 ${index + 1}: ${a.displayName()} 설정", scroll, onOk = {
+        settingsDialog = dialog("스텝 ${index + 1}: ${a.displayName()} 설정", scroll, onOk = {
             fun num(key: String, def: Long) = fields[key]?.text?.toString()?.trim()?.toLongOrNull() ?: def
             fields["name"]?.let { a.name = it.text.toString().trim().ifBlank { null } }
             fields["x"]?.let { a.x = num("x", a.x.toLong()).toInt() }
@@ -1001,13 +1040,15 @@ class OverlayPanel(private val service: OverlayService) {
         inputType = InputType.TYPE_CLASS_NUMBER
     }
 
-    private fun dialog(title: String, content: View?, onOk: () -> Unit) {
+    private fun dialog(title: String, content: View?, onOk: () -> Unit): AlertDialog {
         val b = AlertDialog.Builder(ctx)
         b.setTitle(title)
         content?.let { b.setView(it) }
         b.setPositiveButton("확인") { _, _ -> onOk() }
         b.setNegativeButton("취소", null)
-        showOverlayDialog(b.create())
+        val d = b.create()
+        showOverlayDialog(d)
+        return d
     }
 
     private fun showOverlayDialog(d: AlertDialog) {

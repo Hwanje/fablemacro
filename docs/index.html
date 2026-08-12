@@ -174,7 +174,8 @@
 "use strict";
 
 const REPO = "Hwanje/fablemacro";
-const GOTO = { NEXT: 0, STOP: -1 };
+// 앱의 Goto 상수와 같은 값이어야 한다. 0 이상은 해당 단계 인덱스로 점프.
+const GOTO = { NEXT: -1, STOP: -2 };
 
 /* 앱의 ActionType과 1:1로 맞춘 단계 정의 */
 const TYPES = {
@@ -213,7 +214,7 @@ function newAction(type){
     packageName:null, appLabel:null,
     clickOnFound:true, maxAttempts:-1, retryIntervalMs:1000,
     postDelayMs:300, onSuccessGoto:GOTO.NEXT,
-    onFailureGoto: TYPES[type].search ? GOTO.STOP : GOTO.STOP,
+    onFailureGoto: GOTO.STOP,
     repeatCount:1, imageData:null,
   };
 }
@@ -398,14 +399,24 @@ function numInput(a,key,type){
   return input;
 }
 
-/* 분기 값은 사용자에게 1-based 단계 번호로 보여준다 */
+/* 분기 값은 앱과 같게 0 = 다음, -1 = 중지, n = n번 단계로 보여준다 */
+function gotoToUi(v){
+  if(v===GOTO.NEXT) return 0;
+  if(v===GOTO.STOP) return -1;
+  return v+1;
+}
+function uiToGoto(v){
+  if(v===0) return GOTO.NEXT;
+  if(v<0) return GOTO.STOP;
+  return v-1;
+}
 function gotoInput(a,key){
-  const input = el("input",{type:"number", value: a[key]>=0 ? a[key]+1 : a[key]});
+  const input = el("input",{type:"number", value: gotoToUi(a[key])});
   input.title = "0 = 다음 단계, -1 = 중지, n = n번 단계";
   input.oninput = ()=>{
     const v = parseInt(input.value,10);
     if(Number.isNaN(v)) return;
-    a[key] = v===0 ? GOTO.NEXT : (v<0 ? GOTO.STOP : v-1);
+    a[key] = uiToGoto(v);
     updateShare();
   };
   return input;
