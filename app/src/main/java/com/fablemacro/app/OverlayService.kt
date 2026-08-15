@@ -244,6 +244,8 @@ class OverlayService : Service(), MacroEngine.Listener {
         val p = panel ?: OverlayPanel(this).also { panel = it }
         if (visible && !panelAttached) {
             val density = resources.displayMetrics.density
+            // 가로 화면은 세로가 짧으므로 위쪽 여백을 줄여 패널 자리를 더 준다
+            val landscape = resources.displayMetrics.widthPixels > resources.displayMetrics.heightPixels
             val params = WindowManager.LayoutParams(
                 (330 * density).toInt(),
                 WindowManager.LayoutParams.WRAP_CONTENT,
@@ -253,13 +255,25 @@ class OverlayService : Service(), MacroEngine.Listener {
             ).apply {
                 gravity = Gravity.TOP or Gravity.END
                 x = (4 * density).toInt()
-                y = (60 * density).toInt()
+                y = ((if (landscape) 8 else 60) * density).toInt()
             }
             wm.addView(p.root, params)
             panelAttached = true
         } else if (!visible && panelAttached) {
             wm.removeView(p.root)
             panelAttached = false
+        }
+    }
+
+    /**
+     * 화면을 돌리면 패널 크기·위치 기준이 바뀌므로 붙였다 다시 붙여 새로 재도록 한다.
+     * 캡처 쪽 크기는 다음 캡처 때 ScreenCapturer가 알아서 맞춘다.
+     */
+    override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
+        super.onConfigurationChanged(newConfig)
+        if (panelAttached) {
+            setPanelVisible(false)
+            mainHandler.post { setPanelVisible(true) }
         }
     }
 

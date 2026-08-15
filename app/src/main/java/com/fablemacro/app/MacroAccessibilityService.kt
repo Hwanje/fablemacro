@@ -90,6 +90,20 @@ class MacroAccessibilityService : AccessibilityService() {
     fun globalHome() = performGlobalAction(GLOBAL_ACTION_HOME)
     fun globalRecents() = performGlobalAction(GLOBAL_ACTION_RECENTS)
 
+    /** 포커스된 입력 필드 뒤에 글자를 덧붙인다 (키 입력용) */
+    fun appendTextToFocused(text: String): Boolean {
+        val root = rootInActiveWindow ?: return false
+        val node = root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT) ?: return false
+        if (!node.isEditable) return false
+        val existing = node.text?.toString().orEmpty()
+        val args = Bundle().apply {
+            putCharSequence(
+                AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, existing + text
+            )
+        }
+        return node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
+    }
+
     /** 포커스된 입력 필드에 텍스트 입력 */
     fun setTextToFocused(text: String): Boolean {
         val root = rootInActiveWindow ?: return false

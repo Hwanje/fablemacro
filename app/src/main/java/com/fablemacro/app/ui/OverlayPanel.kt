@@ -20,6 +20,7 @@ import android.widget.ScrollView
 import android.widget.TextView
 import com.fablemacro.app.OverlayService
 import com.fablemacro.app.backup.BackupManager
+import com.fablemacro.app.input.KeyInput
 import com.fablemacro.app.model.ActionType
 import com.fablemacro.app.model.Goto
 import com.fablemacro.app.model.MacroAction
@@ -85,18 +86,22 @@ class OverlayPanel(private val service: OverlayService) {
         header.addView(iconButton("✕", Color.parseColor("#FFFF8A80")) { confirmShutdown() })
         root.addView(header)
 
-        root.addView(divider())
+        // 헤더만 고정하고 나머지는 한 덩어리로 스크롤시킨다.
+        // 가로 화면처럼 세로가 짧을 때 아래쪽이 잘려 안 보이는 것을 막는다.
+        val body = LinearLayout(service).apply { orientation = LinearLayout.VERTICAL }
+        root.addView(BoundedScrollView(service).apply { addView(body) })
+
+        body.addView(divider())
 
         // ── 스크립트 리스트 ──
-        root.addView(text("Script List", 11f, Color.LTGRAY))
+        body.addView(text("Script List", 11f, Color.LTGRAY))
         listContainer = LinearLayout(service).apply { orientation = LinearLayout.VERTICAL }
-        val scroll = ScrollView(service).apply { addView(listContainer) }
-        root.addView(scroll, LinearLayout.LayoutParams(MATCH, dp(210)))
+        body.addView(listContainer)
 
-        root.addView(divider())
+        body.addView(divider())
 
         // ── 액션 팔레트 ──
-        root.addView(text("Action List", 11f, Color.LTGRAY))
+        body.addView(text("Action List", 11f, Color.LTGRAY))
         val grid = GridLayout(service).apply { columnCount = 4 }
         for (type in ActionType.entries) {
             val b = LinearLayout(service).apply {
@@ -114,13 +119,28 @@ class OverlayPanel(private val service: OverlayService) {
             }
             grid.addView(b, lp)
         }
-        root.addView(grid)
+        body.addView(grid)
 
         statusView = text("준비됨", 11f, Color.LTGRAY)
-        root.addView(statusView)
+        body.addView(statusView)
 
         markSaved()
         refreshList()
+    }
+
+    /**
+     * 화면 높이를 넘지 않는 선에서만 자라는 스크롤 영역.
+     * 회전할 때마다 현재 화면 높이를 다시 재므로 가로 화면에서도 잘리지 않는다.
+     */
+    private inner class BoundedScrollView(context: android.content.Context) : ScrollView(context) {
+        override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+            val screenH = service.resources.displayMetrics.heightPixels
+            val max = (screenH - dp(96)).coerceAtLeast(dp(160))
+            super.onMeasure(
+                widthMeasureSpec,
+                MeasureSpec.makeMeasureSpec(max, MeasureSpec.AT_MOST)
+            )
+        }
     }
 
     // ───────────────────────── UI 헬퍼 ─────────────────────────
@@ -803,6 +823,30 @@ class OverlayPanel(private val service: OverlayService) {
             ActionType.RANDOM_TAP -> pickRegion("랜덤 탭 영역을 드래그로 지정하세요") { r ->
                 addAction(MacroAction(type = type, region = intArrayOf(r.left, r.top, r.right, r.bottom)))
             }
+
+            ActionType.KEY_EVENT -> {
+                val input = EditText(ctx).apply { hint = "p, ENTER, SPACE, 7 …" }
+                val layout = LinearLayout(ctx).apply {
+                    orientation = LinearLayout.VERTICAL
+                    setPadding(dp(16), dp(8), dp(16), dp(8))
+                    addView(TextView(ctx).apply {
+                        text = "보낼 키를 한 개 적으세요.\n\n" +
+                                "• 입력창(텍스트 필드)에는 그대로 글자가 들어갑니다.\n" +
+                                "• 게임처럼 입력창이 없는 앱에 키를 보내려면 루팅이 필요합니다 — " +
+                                "안드로이드가 일반 앱의 키 주입을 막아두었기 때문입니다."
+                        textSize = 12f
+                    })
+                    addView(input)
+                }
+                dialog("키 입력", layout, onOk = {
+                    val k = input.text.toString().trim()
+                    when {
+                        k.isEmpty() -> setStatus("키를 입력해주세요")
+                        !KeyInput.isKnown(k) -> setStatus("«$k» 은(는) 알 수 없는 키입니다")
+                        else -> addAction(MacroAction(type = type, text = k))
+                    }
+                })
+            }
         }
     }
 
@@ -966,6 +1010,13 @@ class OverlayPanel(private val service: OverlayService) {
             ActionType.SEARCH_TEXT -> field("text", "찾을 텍스트", a.text ?: "", numeric = false)
             ActionType.PASTE_TEXT -> field("text", "텍스트 (비우면 클립보드)", a.text ?: "", numeric = false)
             ActionType.RANDOM_TAP -> field("dur", "탭 지속시간 (ms)", a.durationMs.toString())
+            ActionType.KEY_EVENT -> {
+                field("text", "키 (p, ENTER, SPACE, 7 …)", a.text ?: "", numeric = false)
+                layout.addView(TextView(ctx).apply {
+                    text = "입력창에는 그대로 들어가고, 게임 등 다른 앱에 보내려면 루팅이 필요합니다."
+                    textSize = 11f
+                })
+            }
             else -> {}
         }
 

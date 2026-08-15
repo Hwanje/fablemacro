@@ -27,7 +27,8 @@ enum class ActionType(val label: String, val emoji: String) {
     BACK("뒤로가기", "◀"),
     HOME("홈", "⌂"),
     RECENTS("최근 앱", "▤"),
-    RANDOM_TAP("랜덤 탭", "🎲");
+    RANDOM_TAP("랜덤 탭", "🎲"),
+    KEY_EVENT("키 입력", "⌨");
 }
 
 /** 분기 상수: onSuccessGoto / onFailureGoto 값 */
@@ -123,6 +124,7 @@ data class MacroAction(
         ActionType.OPEN_APP -> appLabel ?: packageName ?: "?"
         ActionType.BACK, ActionType.HOME, ActionType.RECENTS -> ""
         ActionType.RANDOM_TAP -> region?.let { "[${it[0]},${it[1]}~${it[2]},${it[3]}]" } ?: ""
+        ActionType.KEY_EVENT -> "키 «${text ?: "?"}»"
     }
 }
 

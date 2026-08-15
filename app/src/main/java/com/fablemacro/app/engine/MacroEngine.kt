@@ -7,6 +7,7 @@ import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.Rect
 import com.fablemacro.app.MacroAccessibilityService
+import com.fablemacro.app.input.KeyInput
 import com.fablemacro.app.capture.ScreenCapturer
 import com.fablemacro.app.model.ActionType
 import com.fablemacro.app.model.Goto
@@ -207,6 +208,12 @@ class MacroEngine(
                 val y = if (bottom > top) Random.nextInt(top, bottom) else top
                 svc.tap(x, y, a.durationMs)
             }
+        }
+
+        ActionType.KEY_EVENT -> {
+            val key = a.text
+            if (key.isNullOrBlank()) false
+            else withContext(Dispatchers.IO) { KeyInput.send(acc(), key) }
         }
         }
     }
