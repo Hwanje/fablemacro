@@ -27,6 +27,7 @@ import com.fablemacro.app.model.MacroAction
 import com.fablemacro.app.model.MacroScript
 import com.fablemacro.app.model.ScriptStore
 import com.fablemacro.app.online.MacroLink
+import com.fablemacro.app.vision.ColorFinder
 import kotlinx.coroutines.launch
 import kotlin.math.max
 import kotlin.math.min
@@ -48,6 +49,7 @@ class OverlayPanel(private val service: OverlayService) {
     private val playBtn: TextView
     private val listContainer: LinearLayout
     private val statusView: TextView
+    private val stepCounter: TextView
     private var highlighted = -1
 
     /** 마지막으로 저장/불러온 시점의 내용 — 변경 여부 판단용 */
@@ -77,6 +79,10 @@ class OverlayPanel(private val service: OverlayService) {
             setOnClickListener { renameDialog() }
         }
         header.addView(titleView, LinearLayout.LayoutParams(0, WRAP, 1f))
+        stepCounter = text("", 12f, accent, bold = true).apply {
+            setPadding(dp(4), 0, dp(6), 0)
+        }
+        header.addView(stepCounter)
         playBtn = iconButton("▶", accent) { onPlay() }
         header.addView(playBtn)
         header.addView(iconButton("💾") { onSave() })
@@ -145,6 +151,14 @@ class OverlayPanel(private val service: OverlayService) {
 
     // ───────────────────────── UI 헬퍼 ─────────────────────────
 
+    /** 글자색을 흰/검 중 무엇으로 할지 고르기 위한 밝기 판정 */
+    private fun isDarkColor(rgb: Int): Boolean {
+        val r = (rgb shr 16) and 0xFF
+        val g = (rgb shr 8) and 0xFF
+        val b = rgb and 0xFF
+        return (r * 299 + g * 587 + b * 114) / 1000 < 128
+    }
+
     private fun rounded(color: Int, radiusDp: Int) = GradientDrawable().apply {
         setColor(color)
         cornerRadius = dp(radiusDp).toFloat()
@@ -179,11 +193,18 @@ class OverlayPanel(private val service: OverlayService) {
         statusView.text = s
     }
 
+    /** 지금 몇 번째 스텝인지 헤더에 표시 (0 이하면 지움) */
+    @SuppressLint("SetTextI18n")
+    fun setStepCounter(current: Int, total: Int) {
+        stepCounter.text = if (current <= 0) "" else "$current/$total"
+    }
+
     fun setRunningState(running: Boolean) {
         playBtn.text = if (running) "⏹" else "▶"
         playBtn.setTextColor(if (running) Color.parseColor("#FFF44336") else accent)
         if (!running) {
             highlighted = -1
+            setStepCounter(0, 0)
             refreshList()
         }
     }
@@ -824,6 +845,21 @@ class OverlayPanel(private val service: OverlayService) {
                 addAction(MacroAction(type = type, region = intArrayOf(r.left, r.top, r.right, r.bottom)))
             }
 
+            ActionType.SEARCH_COLOR -> pickColor { color, x, y ->
+                addAction(
+                    MacroAction(
+                        type = ActionType.SEARCH_COLOR,
+                        color = color,
+                        colorTolerance = 24,
+                        x = x, y = y,
+                        // 기본은 «그 지점이 이 색인가» 확인. 넓히려면 ⚙ 에서 영역을 지정한다
+                        region = intArrayOf(x, y, x, y),
+                        clickOnFound = false,
+                        maxAttempts = 1,
+                    )
+                )
+            }
+
             ActionType.KEY_EVENT -> {
                 val input = EditText(ctx).apply { hint = "p, ENTER, SPACE, 7 …" }
                 val layout = LinearLayout(ctx).apply {
@@ -904,6 +940,52 @@ class OverlayPanel(private val service: OverlayService) {
         }
     }
 
+    /** 화면에서 한 점을 터치해 그 자리의 색을 읽어온다 */
+    private fun pickColor(onPicked: (color: Int, x: Int, y: Int) -> Unit) {
+        pickPoint("색을 읽을 지점을 터치하세요") { x, y ->
+            service.setPanelVisible(false)
+            service.uiScope.launch {
+                val frame = service.captureClean()
+                service.setPanelVisible(true)
+                val c = frame?.let { ColorFinder.pixelAt(it, x, y) }
+                if (c == null) {
+                    setStatus("색을 읽지 못했습니다 (화면 캡처 실패)")
+                    return@launch
+                }
+                onPicked(c and 0xFFFFFF, x, y)
+            }
+        }
+    }
+
+    /** 이미 있는 색상 감지 스텝의 색을 다시 고른다 */
+    private fun repickColor(index: Int) {
+        val a = script.actions.getOrNull(index) ?: return
+        pickColor { color, x, y ->
+            a.color = color
+            a.x = x
+            a.y = y
+            // 지점 확인용 영역이었다면 새 지점으로 옮겨준다
+            val r = a.region
+            if (r == null || (r[0] == r[2] && r[1] == r[3])) {
+                a.region = intArrayOf(x, y, x, y)
+            }
+            refreshList()
+            setStatus("색 지정됨: #%06X".format(color and 0xFFFFFF))
+            showSettings(index)
+        }
+    }
+
+    /** 색상 감지 스텝이 훑을 영역을 다시 지정한다 */
+    private fun repickColorRegion(index: Int) {
+        val a = script.actions.getOrNull(index) ?: return
+        pickRegion("«${a.displayName()}» 이 훑을 영역을 드래그로 지정하세요") { r ->
+            a.region = intArrayOf(r.left, r.top, r.right, r.bottom)
+            refreshList()
+            setStatus("영역 지정됨: ${r.width()} x ${r.height()}")
+            showSettings(index)
+        }
+    }
+
     /**
      * 이미 있는 이미지 검색 스텝의 템플릿을 새로 지정한다.
      * 링크로 받은 스켈레톤 매크로처럼 이미지가 비어 있는 스텝을 채울 때 쓴다.
@@ -970,7 +1052,8 @@ class OverlayPanel(private val service: OverlayService) {
             fields[key] = e
         }
 
-        val isSearch = a.type == ActionType.SEARCH_IMAGE || a.type == ActionType.SEARCH_TEXT
+        val isSearch = a.type == ActionType.SEARCH_IMAGE || a.type == ActionType.SEARCH_TEXT ||
+                a.type == ActionType.SEARCH_COLOR
         var clickBox: CheckBox? = null
 
         // 액션 이름 — 모든 타입 공통, 비워두면 타입 이름으로 표시된다
@@ -1010,6 +1093,40 @@ class OverlayPanel(private val service: OverlayService) {
             ActionType.SEARCH_TEXT -> field("text", "찾을 텍스트", a.text ?: "", numeric = false)
             ActionType.PASTE_TEXT -> field("text", "텍스트 (비우면 클립보드)", a.text ?: "", numeric = false)
             ActionType.RANDOM_TAP -> field("dur", "탭 지속시간 (ms)", a.durationMs.toString())
+            ActionType.SEARCH_COLOR -> {
+                val swatch = TextView(ctx).apply {
+                    text = "  찾을 색  #%06X  ".format(a.color and 0xFFFFFF)
+                    textSize = 13f
+                    setPadding(dp(10), dp(10), dp(10), dp(10))
+                    setBackgroundColor(0xFF000000.toInt() or a.color)
+                    setTextColor(if (isDarkColor(a.color)) Color.WHITE else Color.BLACK)
+                }
+                layout.addView(swatch)
+                layout.addView(android.widget.Button(ctx).apply {
+                    text = "색 다시 고르기"
+                    setOnClickListener {
+                        settingsDialog?.dismiss()
+                        repickColor(index)
+                    }
+                })
+                field("hex", "색 (RRGGBB)", "%06X".format(a.color and 0xFFFFFF), numeric = false)
+                field("tol", "허용 오차 (0 = 정확히, 클수록 너그럽게)", a.colorTolerance.toString())
+                layout.addView(TextView(ctx).apply {
+                    text = a.region?.let { r ->
+                        if (r[0] == r[2] && r[1] == r[3]) "범위: (${r[0]}, ${r[1]}) 한 지점만 확인"
+                        else "범위: [${r[0]},${r[1]}] ~ [${r[2]},${r[3]}]"
+                    } ?: "범위: 화면 전체에서 찾기"
+                    textSize = 12f
+                })
+                layout.addView(android.widget.Button(ctx).apply {
+                    text = "찾을 영역 지정"
+                    setOnClickListener {
+                        settingsDialog?.dismiss()
+                        repickColorRegion(index)
+                    }
+                })
+            }
+
             ActionType.KEY_EVENT -> {
                 field("text", "키 (p, ENTER, SPACE, 7 …)", a.text ?: "", numeric = false)
                 layout.addView(TextView(ctx).apply {
@@ -1052,6 +1169,11 @@ class OverlayPanel(private val service: OverlayService) {
                 a.threshold = (it.text.toString().toDoubleOrNull() ?: a.threshold).coerceIn(0.3, 0.99)
             }
             fields["text"]?.let { a.text = it.text.toString() }
+            fields["hex"]?.let { f ->
+                f.text.toString().trim().removePrefix("#").toIntOrNull(16)
+                    ?.let { a.color = it and 0xFFFFFF }
+            }
+            fields["tol"]?.let { a.colorTolerance = num("tol", a.colorTolerance.toLong()).toInt().coerceIn(0, 255) }
             fields["attempts"]?.let {
                 val v = num("attempts", 0)
                 a.maxAttempts = if (v <= 0) -1 else v.toInt()

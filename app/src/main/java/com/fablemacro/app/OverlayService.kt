@@ -80,6 +80,9 @@ class OverlayService : Service(), MacroEngine.Listener {
     private var panelAttached = false
     private var picker: View? = null
     private var marker: View? = null
+
+    /** 실행 중인 스크립트의 전체 스텝 수 — 버블에 «3/10» 처럼 보여주기 위해 */
+    private var runningTotal = 0
     private var nudgeFlip = false
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -227,6 +230,7 @@ class OverlayService : Service(), MacroEngine.Listener {
     private fun setBubbleRunning(running: Boolean) {
         bubble?.apply {
             text = if (running) "■" else "FM"
+            textSize = 18f
             background = GradientDrawable().apply {
                 shape = GradientDrawable.OVAL
                 setColor(if (running) Color.parseColor("#E6B71C1C") else Color.parseColor("#E6212121"))
@@ -235,6 +239,18 @@ class OverlayService : Service(), MacroEngine.Listener {
                     if (running) Color.parseColor("#FFFF8A80") else Color.parseColor("#FF8BC34A")
                 )
             }
+        }
+    }
+
+    /**
+     * 실행 중에는 패널이 숨겨져 버블만 보이므로, 지금 몇 번째 스텝인지를 버블에 띄운다.
+     * 재시도 중이면 시도 횟수도 함께 보여 멈춘 것인지 도는 중인지 구분된다.
+     */
+    private fun setBubbleStep(index: Int, attempt: Int) {
+        bubble?.apply {
+            val step = "${index + 1}/${runningTotal.coerceAtLeast(index + 1)}"
+            text = if (attempt > 1) "$step\n↺$attempt" else step
+            textSize = if (attempt > 1) 11f else 14f
         }
     }
 
@@ -373,6 +389,7 @@ class OverlayService : Service(), MacroEngine.Listener {
             panel?.setStatus("스크립트가 비어 있습니다")
             return
         }
+        runningTotal = script.actions.size
         setPanelVisible(false)
         setBubbleRunning(true)
         panel?.setRunningState(true)
@@ -389,8 +406,10 @@ class OverlayService : Service(), MacroEngine.Listener {
 
     override fun onStep(index: Int, action: MacroAction, attempt: Int) {
         panel?.highlight(index)
+        setBubbleStep(index, attempt)
         val att = if (attempt > 1) " (시도 $attempt)" else ""
-        panel?.setStatus("실행 중: ${index + 1}. ${action.displayName()}$att")
+        panel?.setStepCounter(index + 1, runningTotal)
+        panel?.setStatus("실행 중: ${index + 1}/${runningTotal}. ${action.displayName()}$att")
     }
 
     override fun onFinished(message: String) {

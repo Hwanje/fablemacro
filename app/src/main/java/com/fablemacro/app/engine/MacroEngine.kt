@@ -14,6 +14,7 @@ import com.fablemacro.app.model.Goto
 import com.fablemacro.app.model.MacroAction
 import com.fablemacro.app.model.MacroScript
 import com.fablemacro.app.model.ScriptStore
+import com.fablemacro.app.vision.ColorFinder
 import com.fablemacro.app.vision.OcrHelper
 import com.fablemacro.app.vision.TemplateMatcher
 import kotlinx.coroutines.CoroutineScope
@@ -214,6 +215,10 @@ class MacroEngine(
             val key = a.text
             if (key.isNullOrBlank()) false
             else withContext(Dispatchers.IO) { KeyInput.send(acc(), key) }
+        }
+
+        ActionType.SEARCH_COLOR -> searchLoop(index, a) { frame ->
+            ColorFinder.find(frame, a.color, a.colorTolerance, a.region)
         }
         }
     }

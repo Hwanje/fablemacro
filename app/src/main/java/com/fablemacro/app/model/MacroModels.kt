@@ -28,7 +28,8 @@ enum class ActionType(val label: String, val emoji: String) {
     HOME("홈", "⌂"),
     RECENTS("최근 앱", "▤"),
     RANDOM_TAP("랜덤 탭", "🎲"),
-    KEY_EVENT("키 입력", "⌨");
+    KEY_EVENT("키 입력", "⌨"),
+    SEARCH_COLOR("색상 감지", "🎨");
 }
 
 /** 분기 상수: onSuccessGoto / onFailureGoto 값 */
@@ -85,6 +86,9 @@ data class MacroAction(
     var onFailureGoto: Int = Goto.STOP,
     // TAP 반복 횟수
     var repeatCount: Int = 1,
+    // SEARCH_COLOR 찾을 색 (0xRRGGBB) 과 허용 오차 (0~255)
+    var color: Int = 0,
+    var colorTolerance: Int = 24,
     // 링크/웹으로 주고받을 때만 쓰는 템플릿 이미지 본문 (base64 PNG).
     // 기기에 저장할 때는 imageFile로 풀어 쓰고 이 값은 비운다.
     var imageData: String? = null,
@@ -100,11 +104,16 @@ data class MacroAction(
         ActionType.TAP -> listOf(intArrayOf(x, y))
         ActionType.SWIPE -> listOf(intArrayOf(x, y), intArrayOf(x2, y2))
         ActionType.PATH -> points.toList()
+        // 색을 읽은 지점은 한 점이라 사각형으로는 안 보이므로 점으로 표시한다
+        ActionType.SEARCH_COLOR -> listOf(intArrayOf(x, y))
         else -> emptyList()
     }
 
     fun previewRegion(): IntArray? = when (type) {
         ActionType.TAP, ActionType.SWIPE, ActionType.PATH -> null
+        // 한 지점만 확인하는 경우의 1x1 영역은 그릴 필요가 없다
+        ActionType.SEARCH_COLOR ->
+            region?.takeIf { it[0] != it[2] || it[1] != it[3] }
         else -> region
     }
 
@@ -125,6 +134,8 @@ data class MacroAction(
         ActionType.BACK, ActionType.HOME, ActionType.RECENTS -> ""
         ActionType.RANDOM_TAP -> region?.let { "[${it[0]},${it[1]}~${it[2]},${it[3]}]" } ?: ""
         ActionType.KEY_EVENT -> "키 «${text ?: "?"}»"
+        ActionType.SEARCH_COLOR -> "#%06X ±$colorTolerance".format(color and 0xFFFFFF) +
+                (if (maxAttempts < 0) " ↺∞" else " ↺$maxAttempts")
     }
 }
 

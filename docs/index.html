@@ -193,6 +193,7 @@ const TYPES = {
   RECENTS:      { label:"최근 앱",         emoji:"▢", fields:[] },
   RANDOM_TAP:   { label:"랜덤 탭",         emoji:"🎲", fields:["region","durationMs"] },
   KEY_EVENT:    { label:"키 입력",         emoji:"⌨", fields:["text"] },
+  SEARCH_COLOR: { label:"색상 감지",       emoji:"🎨", fields:["color","colorTolerance","region","maxAttempts","retryIntervalMs","clickOnFound"], search:true },
 };
 
 const FIELDS = {
@@ -204,6 +205,7 @@ const FIELDS = {
   maxAttempts:{l:"재시도 (-1 = 무한)",t:"int"}, retryIntervalMs:{l:"재시도 간격 (ms)",t:"int"},
   clickOnFound:{l:"찾은 위치 클릭",t:"bool"},
   region:{l:"영역 [좌,상,우,하]",t:"ints"}, points:{l:"지점 [[x,y],…]",t:"pairs"},
+  color:{l:"찾을 색",t:"hex"}, colorTolerance:{l:"허용 오차 (0~255)",t:"int"},
 };
 
 function newAction(type){
@@ -214,6 +216,7 @@ function newAction(type){
     imageFile:null, threshold:0.85, text:null, region:null,
     packageName:null, appLabel:null,
     clickOnFound:true, maxAttempts:-1, retryIntervalMs:1000,
+    color:0, colorTolerance:24,
     postDelayMs:300, onSuccessGoto:GOTO.NEXT,
     onFailureGoto: GOTO.STOP,
     repeatCount:1, imageData:null,
@@ -369,6 +372,19 @@ function fieldFor(a, key){
     } else if(meta.t==="str"){
       input = el("input",{value:a[key]==null?"":a[key]});
       input.oninput = ()=>{ a[key] = input.value===""?null:input.value; updateShare(); };
+    } else if(meta.t==="hex"){
+      input = el("div",{className:"row"});
+      const swatch = el("input",{type:"color", value:"#"+((a[key]||0)&0xFFFFFF).toString(16).padStart(6,"0")});
+      const hex = el("input",{value:((a[key]||0)&0xFFFFFF).toString(16).padStart(6,"0").toUpperCase()});
+      hex.style.flex="1";
+      const sync = v=>{ a[key]=v&0xFFFFFF; updateShare(); };
+      swatch.oninput = ()=>{ const v=parseInt(swatch.value.slice(1),16); hex.value=swatch.value.slice(1).toUpperCase(); sync(v); };
+      hex.oninput = ()=>{
+        const v=parseInt(hex.value.trim().replace(/^#/,""),16);
+        if(Number.isNaN(v)){ hex.style.borderColor="var(--danger)"; return; }
+        hex.style.borderColor=""; swatch.value="#"+(v&0xFFFFFF).toString(16).padStart(6,"0"); sync(v);
+      };
+      input.append(swatch, hex);
     } else if(meta.t==="ints" || meta.t==="pairs"){
       input = el("input",{
         value: a[key]==null ? "" : JSON.stringify(a[key]),
