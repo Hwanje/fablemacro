@@ -36,6 +36,7 @@ import com.fablemacro.app.ui.OverlayPanel
 import com.fablemacro.app.ui.fullscreenPickerParams
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
@@ -68,6 +69,9 @@ class OverlayService : Service(), MacroEngine.Listener {
     lateinit var engine: MacroEngine
         private set
 
+    /** 엔진 준비 여부 — 준비 전에 engine을 건드리면 예외가 난다 */
+    val isEngineReady: Boolean get() = this::engine.isInitialized
+
     private var projection: MediaProjection? = null
     private var capturer: ScreenCapturer? = null
 
@@ -78,12 +82,18 @@ class OverlayService : Service(), MacroEngine.Listener {
     private var bubbleParams: WindowManager.LayoutParams? = null
     private var panel: OverlayPanel? = null
     private var panelAttached = false
+
+    /** 패널이 화면에 붙어 있는지 — 숨은 동안 불필요한 목록 갱신을 피하려고 본다 */
+    val isPanelVisible: Boolean get() = panelAttached
     private var picker: View? = null
     private var marker: View? = null
 
     /** 실행 중인 스크립트의 전체 스텝 수 — 버블에 «3/10» 처럼 보여주기 위해 */
     private var runningTotal = 0
     private var nudgeFlip = false
+
+    /** 캡처 때문에 버블을 숨긴 상태인지 */
+    private var bubbleHidden = false
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -149,7 +159,7 @@ class OverlayService : Service(), MacroEngine.Listener {
         val notification: Notification = Notification.Builder(this, channelId)
             .setSmallIcon(R.drawable.ic_launcher)
             .setContentTitle("FableMacro 실행 중")
-            .setContentText("플로팅 버블을 눌러 매크로 패널을 여세요")
+            .setContentText("버블 탭 = 패널 열기 · 길게 누르기 = 되돌리기")
             .addAction(Notification.Action.Builder(null, "종료", stopIntent).build())
             .build()
         if (Build.VERSION.SDK_INT >= 29) {
@@ -209,7 +219,9 @@ class OverlayService : Service(), MacroEngine.Listener {
                     }
                 }
                 MotionEvent.ACTION_UP -> {
-                    if (!moved) onBubbleClick()
+                    if (!moved) {
+                        if (e.eventTime - e.downTime >= 600) onBubbleLongPress() else onBubbleClick()
+                    }
                 }
             }
             true
@@ -219,8 +231,23 @@ class OverlayService : Service(), MacroEngine.Listener {
         bubbleParams = params
     }
 
+    /**
+     * 길게 누르면 상태를 되돌린다.
+     * 캡처 중 멈춤이나 픽커가 남는 등으로 조작 수단이 사라졌을 때의 탈출구.
+     */
+    private fun onBubbleLongPress() {
+        if (isEngineReady && engine.isRunning) runCatching { engine.stop() }
+        removePicker()
+        removeMarker()
+        setBubbleHidden(false)
+        setBubbleRunning(false)
+        panel?.setRunningState(false)
+        setPanelVisible(true)
+        panel?.setStatus("길게 눌러 되돌렸습니다")
+    }
+
     private fun onBubbleClick() {
-        if (engine.isRunning) {
+        if (isEngineReady && engine.isRunning) {
             stopMacro()
         } else {
             setPanelVisible(!panelAttached)
@@ -275,6 +302,7 @@ class OverlayService : Service(), MacroEngine.Listener {
             }
             wm.addView(p.root, params)
             panelAttached = true
+            p.onShown()
         } else if (!visible && panelAttached) {
             wm.removeView(p.root)
             panelAttached = false
@@ -345,7 +373,7 @@ class OverlayService : Service(), MacroEngine.Listener {
 
     /** 오버레이(버블 + 패널)를 완전히 종료한다. 실행 중인 매크로가 있으면 먼저 멈춘다. */
     fun shutdownOverlay() {
-        if (engine.isRunning) runCatching { engine.stop() }
+        if (isEngineReady && engine.isRunning) runCatching { engine.stop() }
         stopSelf()
     }
 
@@ -356,12 +384,16 @@ class OverlayService : Service(), MacroEngine.Listener {
 
     // ───────────────────────── 캡처 ─────────────────────────
 
-    /** 화면 갱신 유발: 버블 알파를 미세하게 흔들어 새 프레임 생성 */
+    /**
+     * 화면이 멈춰 있으면 새 캡처 프레임이 오지 않으므로 버블을 아주 조금 흔들어 갱신을 유발한다.
+     * 현재 alpha에 더하면 값이 조금씩 흘러내려 버블이 사라지므로, 기준값에서만 흔든다.
+     */
     private fun nudgeScreen() {
         mainHandler.post {
             bubble?.let {
                 nudgeFlip = !nudgeFlip
-                it.alpha = it.alpha + if (nudgeFlip) -0.01f else 0.01f
+                val base = if (bubbleHidden) 0.02f else 1f
+                it.alpha = (base - if (nudgeFlip) 0.01f else 0f).coerceIn(0.01f, 1f)
             }
         }
     }
@@ -369,24 +401,38 @@ class OverlayService : Service(), MacroEngine.Listener {
     /** 오버레이를 거의 안 보이게 숨긴 뒤 깨끗한 프레임 캡처 (템플릿 저장용) */
     suspend fun captureClean(): Bitmap? {
         val cap = capturer ?: return null
-        withContext(Dispatchers.Main) { bubble?.alpha = 0.02f }
-        delay(250)
-        cap.capture(onNudge = ::nudgeScreen) // 이전 프레임 소거
-        val frame = cap.capture(onNudge = ::nudgeScreen)
-        withContext(Dispatchers.Main) { bubble?.alpha = 1f }
-        return frame
+        return try {
+            withContext(Dispatchers.Main + NonCancellable) { setBubbleHidden(true) }
+            delay(250)
+            cap.capture(onNudge = ::nudgeScreen) // 이전 프레임 소거
+            cap.capture(onNudge = ::nudgeScreen)
+        } finally {
+            // 예외나 취소로 빠져나가도 버블은 반드시 되돌린다.
+            // 안 그러면 버블이 거의 투명하게 남아 보이지도, 눌리지도 않는다.
+            withContext(Dispatchers.Main + NonCancellable) { setBubbleHidden(false) }
+        }
+    }
+
+    /** 캡처 동안 버블을 화면에서 지웠다 되돌린다 */
+    private fun setBubbleHidden(hidden: Boolean) {
+        bubbleHidden = hidden
+        bubble?.alpha = if (hidden) 0.02f else 1f
     }
 
     // ───────────────────────── 매크로 실행 ─────────────────────────
 
     fun startMacro(script: MacroScript) {
-        if (engine.isRunning) return
+        if (!isEngineReady || engine.isRunning) return
         if (MacroAccessibilityService.instance == null) {
-            panel?.setStatus("⚠ 접근성 서비스를 먼저 켜주세요")
+            refuseStart("접근성 서비스가 꺼져 있어 실행할 수 없습니다.\n설정 → 접근성 → FableMacro 를 켜주세요.")
             return
         }
         if (script.actions.isEmpty()) {
-            panel?.setStatus("스크립트가 비어 있습니다")
+            refuseStart("스텝이 없습니다. 아래 Action List에서 액션을 먼저 추가하세요.")
+            return
+        }
+        if (capturer == null) {
+            refuseStart("화면 캡처가 준비되지 않았습니다. 오버레이를 종료하고 앱에서 다시 시작해주세요.")
             return
         }
         runningTotal = script.actions.size
@@ -396,8 +442,15 @@ class OverlayService : Service(), MacroEngine.Listener {
         engine.start(script)
     }
 
+    /** 실행을 못 하는 이유는 눈에 띄게 알린다 — 상태줄만 바꾸면 «버튼이 안 눌린다»로 보인다 */
+    private fun refuseStart(reason: String) {
+        panel?.setStatus("⚠ 실행할 수 없음")
+        setPanelVisible(true)
+        android.widget.Toast.makeText(this, reason, android.widget.Toast.LENGTH_LONG).show()
+    }
+
     fun stopMacro() {
-        engine.stop()
+        if (isEngineReady) engine.stop()
         setBubbleRunning(false)
         panel?.setRunningState(false)
         setPanelVisible(true)
@@ -423,7 +476,7 @@ class OverlayService : Service(), MacroEngine.Listener {
 
     override fun onDestroy() {
         isRunning = false
-        runCatching { engine.stop() }
+        if (isEngineReady) runCatching { engine.stop() }
         mainHandler.removeCallbacksAndMessages(null)
         removePicker()
         removeMarker()

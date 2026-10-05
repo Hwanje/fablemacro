@@ -81,6 +81,7 @@ class OverlayPanel(private val service: OverlayService) {
         header.addView(titleView, LinearLayout.LayoutParams(0, WRAP, 1f))
         stepCounter = text("", 12f, accent, bold = true).apply {
             setPadding(dp(4), 0, dp(6), 0)
+            visibility = View.GONE
         }
         header.addView(stepCounter)
         playBtn = iconButton("▶", accent) { onPlay() }
@@ -193,10 +194,16 @@ class OverlayPanel(private val service: OverlayService) {
         statusView.text = s
     }
 
+    /** 숨어 있는 동안 건너뛴 목록 갱신을 패널이 다시 보일 때 한 번 반영한다 */
+    fun onShown() {
+        refreshList()
+    }
+
     /** 지금 몇 번째 스텝인지 헤더에 표시 (0 이하면 지움) */
     @SuppressLint("SetTextI18n")
     fun setStepCounter(current: Int, total: Int) {
         stepCounter.text = if (current <= 0) "" else "$current/$total"
+        stepCounter.visibility = if (current <= 0) View.GONE else View.VISIBLE
     }
 
     fun setRunningState(running: Boolean) {
@@ -212,7 +219,9 @@ class OverlayPanel(private val service: OverlayService) {
     fun highlight(index: Int) {
         if (highlighted == index) return
         highlighted = index
-        refreshList()
+        // 숨어 있는 동안 전체 목록을 다시 그리면 메인 스레드만 잡아먹는다.
+        // 빠른 감시 루프에서는 초당 수십 번 불리므로 그만큼 조작이 둔해진다.
+        if (service.isPanelVisible) refreshList()
     }
 
     // ───────────────────────── 스크립트 리스트 ─────────────────────────
@@ -322,6 +331,10 @@ class OverlayPanel(private val service: OverlayService) {
     }
 
     private fun runSingle(a: MacroAction) {
+        if (!service.isEngineReady) {
+            setStatus("⚠ 아직 준비 중입니다 — 잠시 후 다시 눌러주세요")
+            return
+        }
         val single = MacroScript(name = "single", actions = mutableListOf(a.copy(onSuccessGoto = Goto.STOP, onFailureGoto = Goto.STOP)))
         service.startMacro(single)
     }
@@ -329,6 +342,10 @@ class OverlayPanel(private val service: OverlayService) {
     // ───────────────────────── 헤더 동작 ─────────────────────────
 
     private fun onPlay() {
+        if (!service.isEngineReady) {
+            setStatus("⚠ 아직 준비 중입니다 — 잠시 후 다시 눌러주세요")
+            return
+        }
         if (service.engine.isRunning) {
             service.stopMacro()
         } else {
@@ -921,8 +938,12 @@ class OverlayPanel(private val service: OverlayService) {
     private fun captureTemplateImage(r: Rect, onSaved: (String) -> Unit) {
         service.setPanelVisible(false)
         service.uiScope.launch {
-            val frame = service.captureClean()
-            service.setPanelVisible(true)
+            // 어떤 이유로 끝나든 패널은 되돌린다 — 안 그러면 조작할 수단이 사라진다
+            val frame = try {
+                service.captureClean()
+            } finally {
+                service.setPanelVisible(true)
+            }
             if (frame == null) {
                 setStatus("화면 캡처 실패")
                 return@launch
@@ -945,8 +966,11 @@ class OverlayPanel(private val service: OverlayService) {
         pickPoint("색을 읽을 지점을 터치하세요") { x, y ->
             service.setPanelVisible(false)
             service.uiScope.launch {
-                val frame = service.captureClean()
-                service.setPanelVisible(true)
+                val frame = try {
+                    service.captureClean()
+                } finally {
+                    service.setPanelVisible(true)
+                }
                 val c = frame?.let { ColorFinder.pixelAt(it, x, y) }
                 if (c == null) {
                     setStatus("색을 읽지 못했습니다 (화면 캡처 실패)")
